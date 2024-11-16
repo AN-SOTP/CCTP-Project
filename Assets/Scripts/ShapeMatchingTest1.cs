@@ -1,10 +1,10 @@
+/*
 using UnityEngine;
 
 public class ShapeMatchingTest : MonoBehaviour
 {
-    //public float strength = 50f; //threshold for fracturing in the far future maybe idk
+    public float strength = 50f; // Force threshold for fracturing
     private Mesh originalMesh;
-    Rigidbody rb;
 
     private MeshFilter mesh_filter;
     int[] triangles;
@@ -15,10 +15,11 @@ public class ShapeMatchingTest : MonoBehaviour
     Vector3 current_centroid;
 
     float delta_time;
-    public float stiffness = 0.1f; //0 = elastic 1 = rigid
+    public float stiffness = 0.5f; // Adjust between 0 (elastic) and 1 (rigid)
 
     void Start()
     {
+        // Retrieve the mesh filter and mesh
         mesh_filter = GetComponent<MeshFilter>();
         if (mesh_filter != null)
         {
@@ -28,17 +29,6 @@ public class ShapeMatchingTest : MonoBehaviour
         {
             Debug.LogError("No MeshFilter found on this GameObject!");
         }
-
-        rb = GetComponent<Rigidbody>();
-        if (rb == null)
-        {
-            Debug.LogError("No Rigidbody found on this GameObject! Adding one.");
-            rb = gameObject.AddComponent<Rigidbody>();
-        }
-
-        rb.GetComponent<Rigidbody>().useGravity = true;
-        rb.GetComponent<Rigidbody>().isKinematic = false;
-        //rb.freezeRotation = true;
 
         original_vertices_position = originalMesh.vertices;
         current_vertices_position = new Vector3[original_vertices_position.Length];
@@ -61,35 +51,36 @@ public class ShapeMatchingTest : MonoBehaviour
 
         ApplyForces(delta_time);
         ShapeMatching();
-        //CollisionDetection();
+        HandleCollisions();
         UpdateMesh();
 
+        // Optionally update transform.position
         // transform.position = ComputeCentroidWorldSpace(current_vertices_position);
     }
 
     void ApplyForces(float deltaTime)
     {
-        float damping_factor = 0.98f; //between 0 and 1
+        float damping_factor = 0.98f; // Adjust between 0 and 1
 
-        /*Vector3 gravity = Physics.gravity;
+        // Gravity is in world space; convert to local space if necessary
+        Vector3 gravity = Physics.gravity;
 
         for (int i = 0; i < velocities.Length; i++)
         {
+            // Apply gravity
             velocities[i] += gravity * deltaTime;
 
+            // Apply damping
             velocities[i] *= damping_factor;
-            current_vertices_position[i] += velocities[i] * deltaTime;
-        }*/
 
-        for (int i = 0; i < velocities.Length; i++)
-        {
-            velocities[i] *= damping_factor;
-            //current_vertices_position[i] += velocities[i] * deltaTime;
+            // Update vertex positions
+            current_vertices_position[i] += velocities[i] * deltaTime;
         }
     }
-    
+
     void ShapeMatching()
     {
+        // Compute centroids in world space
         original_centroid = ComputeCentroidWorldSpace(original_vertices_position);
         current_centroid = ComputeCentroidWorldSpace(current_vertices_position);
 
@@ -99,65 +90,63 @@ public class ShapeMatchingTest : MonoBehaviour
 
         for (int i = 0; i < vertex_count; i++)
         {
-            //convert to world space
+            // Convert to world space
             Vector3 original_vertex_world = transform.TransformPoint(original_vertices_position[i]);
             Vector3 current_vertex_world = transform.TransformPoint(current_vertices_position[i]);
 
-            //relative positions in world space
+            // Relative positions in world space
             p[i] = original_vertex_world - original_centroid;
             q[i] = current_vertex_world - current_centroid;
-            //p[i] = original_vertices_position[i] - original_centroid;
-            //q[i] = current_vertices_position[i] - current_centroid;
         }
 
-        //compute covariance matrix
+        // Compute covariance matrix
         float[,] a = new float[3, 3];
         for (int i = 0; i < vertex_count; i++)
         {
             AddOuterProduct(ref a, q[i], p[i]);
         }
-        
+
         Quaternion r = GetOptimalRotation(a);
 
         for (int i = 0; i < vertex_count; i++)
         {
-            //calculate goal position in world space, correction, velocities and positions in world space and then back to local space
-            
+            // Calculate goal position in world space
             Vector3 goal_position = r * p[i] + current_centroid;
 
-            Vector3 current_vertex_world = transform.TransformPoint(current_vertices_position[i]);
-            Vector3 correction = (goal_position - current_vertex_world) * stiffness;
+            // Compute correction in world space
+            Vector3 correction = (goal_position - transform.TransformPoint(current_vertices_position[i])) * stiffness;
 
-            Vector3 velocity_world = transform.TransformDirection(velocities[i]);
-            velocity_world += correction / delta_time;
+            // Convert correction to local space
+            correction = transform.InverseTransformDirection(correction);
 
-            current_vertex_world += velocity_world * delta_time;
-
-            velocities[i] = transform.InverseTransformDirection(velocity_world);
-            current_vertices_position[i] = transform.InverseTransformPoint(current_vertex_world);
+            // Update velocity and position
+            velocities[i] += correction / delta_time;
+            current_vertices_position[i] += correction;
         }
     }
 
-    void CollisionDetection()
+    void HandleCollisions()
     {
         for (int i = 0; i < current_vertices_position.Length; i++)
         {
-            //convert to world space
-            Vector3 vertex_world_pos = transform.TransformPoint(current_vertices_position[i]);
+            // Convert vertex position to world space
+            Vector3 vertexWorldPos = transform.TransformPoint(current_vertices_position[i]);
 
-            if (vertex_world_pos.y < 0f)
+            if (vertexWorldPos.y < 0f)
             {
-                vertex_world_pos.y = 0f;
+                // Set vertex position to plane level in world space
+                vertexWorldPos.y = 0f;
 
-                Vector3 velocity_worrld = transform.TransformDirection(velocities[i]);
-                if (velocity_worrld.y < 0f)
+                // Reset vertical velocity
+                Vector3 velocityWorld = transform.TransformDirection(velocities[i]);
+                if (velocityWorld.y < 0f)
                 {
-                    velocity_worrld.y = 0f;
-                    velocities[i] = transform.InverseTransformDirection(velocity_worrld);
+                    velocityWorld.y = 0f;
+                    velocities[i] = transform.InverseTransformDirection(velocityWorld);
                 }
 
-                //back to local space
-                current_vertices_position[i] = transform.InverseTransformPoint(vertex_world_pos);
+                // Convert back to local space
+                current_vertices_position[i] = transform.InverseTransformPoint(vertexWorldPos);
             }
         }
     }
@@ -168,17 +157,6 @@ public class ShapeMatchingTest : MonoBehaviour
         foreach (Vector3 pos in positions)
         {
             centroid += transform.TransformPoint(pos);
-        }
-        centroid /= positions.Length;
-        return centroid;
-    }
-
-    Vector3 ComputeCentroid(Vector3[] positions)
-    {
-        Vector3 centroid = Vector3.zero;
-        foreach (Vector3 pos in positions)
-        {
-            centroid += pos;
         }
         centroid /= positions.Length;
         return centroid;
@@ -208,8 +186,8 @@ public class ShapeMatchingTest : MonoBehaviour
 
     Quaternion GetOptimalRotation(float[,] A)
     {
-        //kabsch algorihtm to compute rotation (???!?!?!) this is pretty scuffed
-        //symmetric 4x4 matrix for quaternion computation
+        // Use the Kabsch algorithm to compute the optimal rotation
+        // Create a symmetric 4x4 matrix for quaternion computation
         float[,] N = new float[4, 4];
 
         N[0, 0] = A[0, 0] + A[1, 1] + A[2, 2];
@@ -232,7 +210,6 @@ public class ShapeMatchingTest : MonoBehaviour
         N[3, 2] = N[2, 3];
         N[3, 3] = -A[0, 0] - A[1, 1] + A[2, 2];
 
-        //thanks for explaining mr gpt 
         // Compute the eigenvector corresponding to the largest eigenvalue
         // Since N is symmetric, we can use the power iteration method
 
@@ -267,10 +244,10 @@ public class ShapeMatchingTest : MonoBehaviour
     void OnDrawGizmos()
     {
         Gizmos.color = Color.red;
-        Gizmos.DrawSphere(original_centroid, 0.05f);
+        Gizmos.DrawSphere(transform.TransformPoint(original_centroid), 0.05f);
 
         Gizmos.color = Color.blue;
-        Gizmos.DrawSphere(current_centroid, 0.05f);
+        Gizmos.DrawSphere(transform.TransformPoint(current_centroid), 0.05f);
 
         if (current_vertices_position != null)
         {
@@ -282,4 +259,4 @@ public class ShapeMatchingTest : MonoBehaviour
             }
         }
     }
-}
+}*/
