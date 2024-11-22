@@ -10,10 +10,22 @@ using UnityEditor.U2D;
 
 public class VoronoiTest : MonoBehaviour
 {
+
+    class FragmentData
+    {
+        public FortuneSite site;
+        public GameObject fragmentObject;
+        public PolygonCollider2D collider;
+        public List<Vector2> vertices;
+    }
+    
     PolygonCollider2D poly_collider;
     public int num_of_fragments = 10;
     List<Vector2> fracture_points;
+    List<FortuneSite> sites;
     LinkedList<VEdge> edges;
+    Dictionary<FortuneSite, List<VEdge>> site_edges_map;
+    List<FragmentData> fragment_data;
 
     private void Start()
     {
@@ -23,6 +35,9 @@ public class VoronoiTest : MonoBehaviour
             Debug.LogError("No Polygon Collider found on this GameObject! Adding one.");
             poly_collider = gameObject.AddComponent<PolygonCollider2D>();
         }
+
+        GenerateDiagram();
+        Debug.Log("Generated Voronoi Diargram.");
     }
 
     void Update()
@@ -42,61 +57,6 @@ public class VoronoiTest : MonoBehaviour
     IEnumerator FractureObject(Vector2 fracture_point)
     {
         Debug.Log("Object is fractured surely!");
-        
-        fracture_points = new List<Vector2>();
-        //convert click pos (fracture point) to local space
-        fracture_points.Add(transform.InverseTransformPoint(fracture_point)); 
-        
-        //get the array of points that define the shape of the polygon collider
-        Vector2[] path_points = poly_collider.points;
-
-        //get object bounds in local space
-        Bounds object_bounds = new Bounds();
-        foreach (Vector2 point in path_points)
-        {
-            object_bounds.Encapsulate(point);
-        }
-
-        //generate random fracture points in local space within a certain amount of attempts
-        int attempts = 0;
-        while (fracture_points.Count < num_of_fragments + 1 && attempts < num_of_fragments * 10)
-        {
-            Vector2 random_point = new Vector2(
-                Random.Range(object_bounds.min.x, object_bounds.max.x),
-                Random.Range(object_bounds.min.y, object_bounds.max.y));
-
-            // check if point is inside the polygon collider in local space
-            if (IsPointInPolygon(random_point, path_points))
-            {
-                fracture_points.Add(random_point);
-            }
-            attempts++;
-        }
-
-        //convert fracture points to VoronoiLib's FortuneSite
-        List<FortuneSite> sites = fracture_points.Select(p => new FortuneSite(p.x, p.y)).ToList();
-
-        //Rect bounds_rect = new Rect(object_bounds.min.x, object_bounds.min.y, object_bounds.max.x, object_bounds.max.y);
-
-        //run fortune algorithm to get voronoi diagram
-        edges = FortunesAlgorithm.Run(sites, object_bounds.min.x, object_bounds.min.y, object_bounds.max.x, object_bounds.max.y);
-
-        Dictionary<FortuneSite, List<VEdge>> site_edges_map = new Dictionary<FortuneSite, List<VEdge>>();
-        foreach (FortuneSite site in sites)
-        {
-            site_edges_map[site] = new List<VEdge>();
-        }
-        foreach (VEdge edge in edges)
-        {
-            if(edge.Left != null)
-            {
-                site_edges_map[edge.Left].Add(edge);
-            }
-            if (edge.Right != null)
-            {
-                site_edges_map[edge.Right].Add(edge);
-            }
-        }
 
         //use diagram to create the fracture pieces
         foreach (FortuneSite site in sites)
@@ -147,6 +107,7 @@ public class VoronoiTest : MonoBehaviour
 
             Rigidbody2D rigidbody_2D = fragment.AddComponent<Rigidbody2D>();
             rigidbody_2D.gravityScale = 1.0f;
+            rigidbody_2D.AddForce(new Vector2(Random.Range(-200, 200), Random.Range(-200, 200)));
 
             PolygonCollider2D polygon_collider_2D = fragment.AddComponent<PolygonCollider2D>();
             polygon_collider_2D.SetPath(0,cell_vertices.ToArray());
@@ -154,10 +115,68 @@ public class VoronoiTest : MonoBehaviour
 
         }
 
-        //GetComponent<Renderer>().enabled = false;
-        //GetComponent<Collider2D>().enabled = false;
+        GetComponent<Renderer>().enabled = false;
+        GetComponent<Collider2D>().enabled = false;
 
         yield return null;
+    }
+
+    void GenerateDiagram()
+    {
+        fracture_points = new List<Vector2>();
+        //convert click pos (fracture point) to local space
+        //fracture_points.Add(transform.InverseTransformPoint(fracture_point));
+
+        //get the array of points that define the shape of the polygon collider
+        Vector2[] path_points = poly_collider.points;
+
+        //get object bounds in local space
+        Bounds object_bounds = new Bounds();
+        foreach (Vector2 point in path_points)
+        {
+            object_bounds.Encapsulate(point);
+        }
+
+        //generate random fracture points in local space within a certain amount of attempts
+        int attempts = 0;
+        while (fracture_points.Count < num_of_fragments + 1 && attempts < num_of_fragments * 10)
+        {
+            Vector2 random_point = new Vector2(
+                Random.Range(object_bounds.min.x, object_bounds.max.x),
+                Random.Range(object_bounds.min.y, object_bounds.max.y));
+
+            // check if point is inside the polygon collider in local space
+            if (IsPointInPolygon(random_point, path_points))
+            {
+                fracture_points.Add(random_point);
+            }
+            attempts++;
+        }
+
+        //convert fracture points to VoronoiLib's FortuneSite
+        sites = fracture_points.Select(p => new FortuneSite(p.x, p.y)).ToList();
+
+        //Rect bounds_rect = new Rect(object_bounds.min.x, object_bounds.min.y, object_bounds.max.x, object_bounds.max.y);
+
+        //run fortune algorithm to get voronoi diagram
+        edges = FortunesAlgorithm.Run(sites, object_bounds.min.x, object_bounds.min.y, object_bounds.max.x, object_bounds.max.y);
+
+        site_edges_map = new Dictionary<FortuneSite, List<VEdge>>();
+        foreach (FortuneSite site in sites)
+        {
+            site_edges_map[site] = new List<VEdge>();
+        }
+        foreach (VEdge edge in edges)
+        {
+            if (edge.Left != null)
+            {
+                site_edges_map[edge.Left].Add(edge);
+            }
+            if (edge.Right != null)
+            {
+                site_edges_map[edge.Right].Add(edge);
+            }
+        }
     }
 
     bool IsPointInPolygon(Vector2 point, Vector2[] polygon)
