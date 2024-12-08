@@ -14,18 +14,18 @@ public class VoronoiTest : MonoBehaviour
     class FragmentData
     {
         public FortuneSite site;
-        public GameObject fragmentObject;
+        public GameObject fragment_game_object;
         public PolygonCollider2D collider;
         public List<Vector2> vertices;
     }
-    
+
     PolygonCollider2D poly_collider;
     public int num_of_fragments = 10;
     List<Vector2> fracture_points;
     List<FortuneSite> sites;
     LinkedList<VEdge> edges;
     Dictionary<FortuneSite, List<VEdge>> site_edges_map;
-    List<FragmentData> fragment_data;
+    List<FragmentData> fragments;
 
     private void Start()
     {
@@ -46,83 +46,21 @@ public class VoronoiTest : MonoBehaviour
         {
             Vector2 click_position = Camera.main.ScreenToWorldPoint(Input.mousePosition);
 
-            Collider2D collider = GetComponent<Collider2D>();
-            if (collider == Physics2D.OverlapPoint(click_position))
+            //click pos to local space
+            Vector2 local_click_position = transform.InverseTransformPoint(click_position);
+
+            FragmentData clicked_fragment = GetFragmentAtPosition(local_click_position);
+
+            if (clicked_fragment != null)
             {
-                StartCoroutine(FractureObject(click_position));
+                ActivateFragment(clicked_fragment);
             }
         }
-    }
-
-    IEnumerator FractureObject(Vector2 fracture_point)
-    {
-        Debug.Log("Object is fractured surely!");
-
-        //use diagram to create the fracture pieces
-        foreach (FortuneSite site in sites)
-        {
-            List<Vector2> cell_vertices = new List<Vector2>();
-
-            foreach (VEdge edge in site_edges_map[site])
-            {
-                if (edge.Start != null || edge.End != null)
-                {
-                    //start and end point of each VEdge
-                    Vector2 start = new Vector2((float)edge.Start.X, (float)edge.Start.Y);
-                    Vector2 end = new Vector2((float)edge.End.X, (float)edge.End.Y);
-
-                    if (!cell_vertices.Contains(start))
-                    {
-                        cell_vertices.Add(start);
-                    }
-                    if (!cell_vertices.Contains(end))
-                    {
-                        cell_vertices.Add(end);
-                    }
-                }
-            }
-
-            cell_vertices = OrderPolygonVerts(cell_vertices);
-            if (cell_vertices.Count < 3)
-            {
-                continue;
-            }
-
-            Mesh cell_mesh = CreateMeshFromPolygon(cell_vertices);
-            
-            GameObject fragment = new GameObject("Fragment");
-            fragment.transform.position = transform.position;
-            fragment.transform.rotation = transform.rotation;
-            fragment.transform.localScale = transform.localScale;
-
-            MeshFilter mesh_filter = fragment.AddComponent<MeshFilter>();
-            mesh_filter.mesh = cell_mesh;
-
-            MeshRenderer mesh_renderer = fragment.AddComponent<MeshRenderer>();
-
-            //can't just GetComponent from parent mesh renderer for the material as the parent won't have one! for 2d stuff
-            Material sprite_material = new Material(Shader.Find("Sprites/Default"));
-            sprite_material.mainTexture = GetComponent<SpriteRenderer>().sprite.texture;
-            mesh_renderer.material = sprite_material;
-
-            Rigidbody2D rigidbody_2D = fragment.AddComponent<Rigidbody2D>();
-            rigidbody_2D.gravityScale = 1.0f;
-            rigidbody_2D.AddForce(new Vector2(Random.Range(-200, 200), Random.Range(-200, 200)));
-
-            PolygonCollider2D polygon_collider_2D = fragment.AddComponent<PolygonCollider2D>();
-            polygon_collider_2D.SetPath(0,cell_vertices.ToArray());
-            polygon_collider_2D.offset = Vector2.zero;
-
-        }
-
-        GetComponent<Renderer>().enabled = false;
-        GetComponent<Collider2D>().enabled = false;
-
-        yield return null;
     }
 
     void GenerateDiagram()
     {
+        fragments = new List<FragmentData>();
         fracture_points = new List<Vector2>();
         //convert click pos (fracture point) to local space
         //fracture_points.Add(transform.InverseTransformPoint(fracture_point));
@@ -176,6 +114,137 @@ public class VoronoiTest : MonoBehaviour
             {
                 site_edges_map[edge.Right].Add(edge);
             }
+        }
+
+
+        //use diagram to create the fragments, but do not activate them
+        foreach (FortuneSite site in sites)
+        {
+            List<Vector2> cell_vertices = new List<Vector2>();
+
+            foreach (VEdge edge in site_edges_map[site])
+            {
+                if (edge.Start != null || edge.End != null)
+                {
+                    //start and end point of each VEdge
+                    Vector2 start = new Vector2((float)edge.Start.X, (float)edge.Start.Y);
+                    Vector2 end = new Vector2((float)edge.End.X, (float)edge.End.Y);
+
+                    if (!cell_vertices.Contains(start))
+                    {
+                        cell_vertices.Add(start);
+                    }
+                    if (!cell_vertices.Contains(end))
+                    {
+                        cell_vertices.Add(end);
+                    }
+                }
+            }
+
+            cell_vertices = OrderPolygonVerts(cell_vertices);
+            if (cell_vertices.Count < 3)
+            {
+                continue;
+            }
+
+            Mesh cell_mesh = CreateMeshFromPolygon(cell_vertices);
+
+            GameObject fragment = new GameObject("Fragment");
+            fragment.transform.SetParent(transform);
+            fragment.transform.position = transform.position;
+            fragment.transform.rotation = transform.rotation;
+            //fragment.transform.localScale = transform.localScale;
+            fragment.transform.localScale = Vector3.one;
+
+            MeshFilter mesh_filter = fragment.AddComponent<MeshFilter>();
+            mesh_filter.mesh = cell_mesh;
+
+            MeshRenderer mesh_renderer = fragment.AddComponent<MeshRenderer>();
+
+            //can't just GetComponent from parent mesh renderer for the material as the parent won't have one! for 2d stuff
+            Material sprite_material = new Material(Shader.Find("Sprites/Default"));
+            sprite_material.mainTexture = GetComponent<SpriteRenderer>().sprite.texture;
+            mesh_renderer.material = sprite_material;
+
+            mesh_renderer.sortingLayerID = GetComponent<SpriteRenderer>().sortingLayerID;
+            mesh_renderer.sortingOrder = GetComponent<SpriteRenderer>().sortingOrder;
+
+            //Rigidbody2D rigidbody_2D = fragment.AddComponent<Rigidbody2D>();
+            //rigidbody_2D.gravityScale = 1.0f;
+            //rigidbody_2D.AddForce(new Vector2(Random.Range(-200, 200), Random.Range(-200, 200)));
+
+            PolygonCollider2D polygon_collider_2D = fragment.AddComponent<PolygonCollider2D>();
+            polygon_collider_2D.SetPath(0, cell_vertices.ToArray());
+            polygon_collider_2D.offset = Vector2.zero;
+            polygon_collider_2D.isTrigger = true;
+
+            fragments.Add(new FragmentData
+            {
+                site = site,
+                fragment_game_object = fragment,
+                collider = polygon_collider_2D,
+                vertices = cell_vertices
+            });
+
+        }
+
+        //GetComponent<Renderer>().enabled = false;
+        //GetComponent<Collider2D>().enabled = false;
+
+    }
+
+    FragmentData GetFragmentAtPosition(Vector2 _local_click_position)
+    {
+        foreach (var fragment in fragments)
+        {
+            if (IsPointInPolygon(_local_click_position, fragment.vertices.ToArray()))
+            {
+                return fragment;
+            }
+        }
+        return null;
+    }
+
+    void ActivateFragment(FragmentData _fragment_data)
+    {
+        GameObject fragment = _fragment_data.fragment_game_object;
+        fragment.transform.SetParent(null);
+        _fragment_data.collider.isTrigger = false;
+
+        Rigidbody2D rigidbody_2D = fragment.AddComponent<Rigidbody2D>();
+        rigidbody_2D.gravityScale = 1.0f;
+        rigidbody_2D.AddForce(new Vector2(Random.Range(-200, 200), Random.Range(-200, 200)));
+
+        UpdateMainObject(_fragment_data.vertices);
+
+        fragments.Remove(_fragment_data);
+    }
+
+    void UpdateMainObject(List<Vector2> removed_vertices)
+    {
+        // rebuild collider using unactivated fragments
+        List<Vector2[]> paths = new List<Vector2[]>();
+
+        foreach (var fragment in fragments)
+        {
+            paths.Add(fragment.vertices.ToArray());
+        }
+        
+        //update collider of main object
+        if (fragments.Count > 0)
+        {
+            PolygonCollider2D main_collider = GetComponent<PolygonCollider2D>();
+            main_collider.pathCount = paths.Count;
+            for (int i = 0; i < paths.Count; i++)
+            {
+                main_collider.SetPath(i, paths[i]);
+            }
+        }
+        else
+        {
+            // If no fragments are left, disable the collider and renderer
+            GetComponent<Collider2D>().enabled = false;
+            GetComponent<Renderer>().enabled = false;
         }
     }
 
