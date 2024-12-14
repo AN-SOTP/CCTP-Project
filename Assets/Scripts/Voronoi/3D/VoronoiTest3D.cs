@@ -3,14 +3,17 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using MIConvexHull;
+using Sabresaurus;
+using Sabresaurus.SabreCSG;
 using Unity.VisualScripting;
 using UnityEngine;
+using static VoronoiTest3D;
 
 //[ExecuteInEditMode]
 public class VoronoiTest3D : MonoBehaviour
 {
     //local bounds volume of cube mesh
-    private Bounds cube_bounds;
+    private Bounds object_bounds;
     public int num_of_sites = 10;
     //list of 3d positions of voronoi sites
     public List<Vector3> voronoi_sites = new List<Vector3>();
@@ -23,11 +26,84 @@ public class VoronoiTest3D : MonoBehaviour
     //mapping from the original site positions to their corresponding VoronoiVertex
     private Dictionary<Vector3, VoronoiVertex> site_to_vertex_map;
 
+    //CSGModel csg_model;
+    //private PrimitiveBrush object_brush;
+
+    [System.Serializable]
+    public struct plane_data
+    {
+        public Vector3 normal;
+        public float distance;
+    }
+    private List<plane_data> object_planes;
+
+
     private bool fractured = false;
 
     // Start is called before the first frame update
     void Start()
     {
+
+        Mesh object_mesh = GetComponent<MeshFilter>().sharedMesh;
+        if (object_mesh == null)
+        {
+            Debug.LogError("No mesh filter on this game object!");
+            return;
+        }
+
+        MeshCollider mesh_collider = GetComponent<MeshCollider>();
+        if (mesh_collider == null)
+        {
+            Debug.LogError("No mesh collider on this game object! Adding one.");
+            mesh_collider = gameObject.AddComponent<MeshCollider>();
+        }
+        mesh_collider.sharedMesh = object_mesh;
+        mesh_collider.convex = false;
+
+        //print number of triangle of mesh
+        Debug.Log(Equals(object_mesh.triangles.Length, 0) ? "No triangles in mesh" : "Number of triangles in mesh: " + object_mesh.triangles.Length);
+
+        object_planes = GetPlanesFromMesh(object_mesh);
+        Debug.Log("Extracted " + object_planes.Count + " planes from object mesh.");
+
+        /*
+        List<Polygon> polygons = MeshToPolygons(object_mesh);
+        if (polygons == null || polygons.Count == 0)
+        {
+            Debug.LogError("Failed to create polygons from mesh");
+            return;
+        }
+        Polygon[] polygon_array = polygons.ToArray();
+        Mesh polygon_mesh = new Mesh();
+        List<int> polygon_indices;
+
+        BrushFactory.GenerateMeshFromPolygons(polygon_array, ref polygon_mesh, out polygon_indices);
+
+        GameObject object_brushGO = new GameObject("MeshBrush");
+        object_brush = object_brushGO.AddComponent<PrimitiveBrush>();
+        object_brush.SetPolygons(polygon_array, true);
+        object_brush.Invalidate(true);
+
+        CSGModel csg_model = FindObjectOfType<CSGModel>();
+        if (csg_model == null)
+        {
+            GameObject modelGO = new GameObject("CSGModel");
+            csg_model = modelGO.AddComponent<CSGModel>();
+        }
+        csg_model.transform.SetParent(transform);
+        csg_model.transform.localPosition = Vector3.zero;
+        csg_model.transform.localRotation = Quaternion.identity;
+        csg_model.transform.localScale = Vector3.one;
+
+        object_brushGO.transform.SetParent(csg_model.transform);
+        object_brushGO.transform.localPosition = Vector3.zero;
+        object_brushGO.transform.localRotation = Quaternion.identity;
+        object_brushGO.transform.localScale = Vector3.one;
+        
+        csg_model.Build(false, true);
+
+        object_brushGO.transform.parent = this.transform;*/
+
         //generate sites!
         GenerateVoronoiSites();
         //generate diagram using sites!
@@ -50,7 +126,7 @@ public class VoronoiTest3D : MonoBehaviour
     void GenerateVoronoiSites()
     {
         voronoi_sites.Clear();
-        
+
         MeshFilter mesh_filter = GetComponent<MeshFilter>();
         if (mesh_filter == null)
         {
@@ -63,16 +139,16 @@ public class VoronoiTest3D : MonoBehaviour
         //Vector3 scaled_size = Vector3.Scale(local_bounds.size, transform.localScale);
         //cube_bounds = new Bounds(local_bounds.center, scaled_size);
 
-        cube_bounds = local_bounds;
+        object_bounds = local_bounds;
 
         //Vector3 scaled_size = Vector3.Scale(local_bounds.size, transform.localScale);
         //Vector3 scaled_center = Vector3.Scale(local_bounds.center, transform.localScale);
         //cube_bounds = new Bounds(scaled_center, scaled_size);
 
         //Vector3 size = Vector3.Scale(local_bounds.size, transform.localScale);
-        Vector3 min = cube_bounds.min; //bottom left back corner coord of cube
-        Vector3 max = cube_bounds.max; //top front right corner coord of cube
-        
+        Vector3 min = object_bounds.min; //bottom left back corner coord of cube
+        Vector3 max = object_bounds.max; //top front right corner coord of cube
+
         for (int i = 0; i < num_of_sites; i++)
         {
             float x = UnityEngine.Random.Range(min.x, max.x);
@@ -81,7 +157,7 @@ public class VoronoiTest3D : MonoBehaviour
             voronoi_sites.Add(new Vector3(x, y, z));
         }
 
-        //add cube corner points as voronoi sites
+        /*
         Vector3[] corners = new Vector3[8];
         int index = 0;
         for (int x = 0; x <= 1; x++)
@@ -121,9 +197,9 @@ public class VoronoiTest3D : MonoBehaviour
             new Vector3(max.x, max.y, (min.z+max.z)*0.5f)
         };
 
-        voronoi_sites.AddRange(edgeMidpoints);
+        voronoi_sites.AddRange(edgeMidpoints);*/
     }
-    
+
     void GenerateVoronoiDiagram()
     {
         //convert Vector3 points in voronoi_sites to VoronoiVertex which is required by MIConvexHull. results in a list of VoronoiVertex objects
@@ -142,12 +218,17 @@ public class VoronoiTest3D : MonoBehaviour
         foreach (var cell in voronoi_mesh.Vertices)
         {
             cell.ComputeCircumcenter();
-            
+
             //is cirumcenter in object bounds?! (in this case a cube)
-            if (IsPointInsideBounds(cell.Circumcenter,  cube_bounds))
+
+            if (IsPointInsideBounds(cell.Circumcenter, object_bounds))
             {
                 finite_cells.Add(cell);
             }
+            //if(IsPointInsideMesh(cell.Circumcenter))
+            //{
+            //finite_cells.Add(cell);
+            //}
         }
     }
 
@@ -169,10 +250,10 @@ public class VoronoiTest3D : MonoBehaviour
             BuildVoronoiCellForSite(site);
         }
     }
-    
+
     void BuildVoronoiCellForSite(Vector3 site_pos)
     {
-        if(!site_to_vertex_map.ContainsKey(site_pos))
+        if (!site_to_vertex_map.ContainsKey(site_pos))
         {
             return;
         }
@@ -182,14 +263,66 @@ public class VoronoiTest3D : MonoBehaviour
         var cells_with_site = voronoi_mesh.Vertices.Where(v => v.Vertices.Contains(site_vertex)).ToList();
 
         List<Vector3> circumcenters = new List<Vector3>();
-        foreach(var cells in cells_with_site)
+        foreach (var cells in cells_with_site)
         {
             cells.ComputeCircumcenter();
             circumcenters.Add(cells.Circumcenter);
         }
 
-        Mesh cell_mesh = CreateMeshFromCircumcenters(circumcenters);
-        CreateFragmentGameObject(cell_mesh);
+        //create fragment mesh from circumcenters
+        Mesh fragment_mesh = CreateMeshFromCircumcenters(circumcenters);
+
+        //convert fragment mesh to polyhedron for clipping
+        Polyhedron fragment_polyhedron = MeshToPolyhedron(fragment_mesh);
+
+        //clip polyhedron against object planes
+        Polyhedron clipped_polyhedron = ClipPolyhedronAgainstObjectPlanes(fragment_polyhedron, object_planes);
+
+        //convert clipped polyhedron back to mesh
+        Mesh clipped_mesh = BuildMeshFromPolyhedron(clipped_polyhedron);
+        //and then instantiate as a fragment game object
+        CreateFragmentGameObject(clipped_mesh);
+
+        //SabreCSG stuff PAUSED
+        /*
+        Mesh fragment_mesh = CreateMeshFromCircumcenters(circumcenters);
+        List<Polygon> fragment_polygons = MeshToPolygons(fragment_mesh);
+        if(fragment_polygons == null || fragment_polygons.Count == 0)
+        {
+            Debug.LogError("Failed to create polygons from fragment mesh (made from voronoi cell)");
+        }
+        Polygon[] fragment_polygon_array = fragment_polygons.ToArray();
+
+        Mesh fragment_polygon_mesh = new Mesh();
+        List<int> fragment_polygon_indices;
+        BrushFactory.GenerateMeshFromPolygons(fragment_polygon_array, ref fragment_polygon_mesh, out fragment_polygon_indices);
+
+        GameObject fragment_brushGO = new GameObject("VoroFragmentBrush");
+        PrimitiveBrush fragment_brush = fragment_brushGO.AddComponent<PrimitiveBrush>();
+        fragment_brush.SetPolygons(fragment_polygon_array, true);
+        fragment_brush.Invalidate(true);
+
+        //create temp CSGmodel for fragment or else we can't perform any operations (i think)
+        GameObject fragment_modelGO = new GameObject("VoroFragmentModel");
+        CSGModel fragment_model = fragment_modelGO.AddComponent<CSGModel>();
+
+        fragment_modelGO.transform.SetParent(transform);
+        fragment_modelGO.transform.localPosition = Vector3.zero;
+        fragment_modelGO.transform.localRotation = Quaternion.identity;
+        fragment_modelGO.transform.localScale = Vector3.one;
+
+        fragment_brushGO.transform.SetParent(fragment_model.transform);
+        fragment_brushGO.transform.localPosition = Vector3.zero;
+        fragment_brushGO.transform.localRotation = Quaternion.identity;
+        fragment_brushGO.transform.localScale = Vector3.one;
+
+        fragment_model.Build(false, true);
+
+        //now that we have a model and brush for the fragment, time to figure out how to peform clipping :(
+        //CSGModel clipped_model = */
+
+        //Mesh cell_mesh = CreateMeshFromCircumcenters(circumcenters);
+        //CreateFragmentGameObject(cell_mesh);
     }
 
     Mesh CreateMeshFromCircumcenters(List<Vector3> points)
@@ -198,7 +331,7 @@ public class VoronoiTest3D : MonoBehaviour
         var hull = ConvexHull.Create(hull_vertices);
         return CreateMeshFromHull(hull.Result);
     }
-    
+
     Mesh CreateMeshFromHull(ConvexHull<DefaultVertex, DefaultConvexFace<DefaultVertex>> hull)
     {
         var hull_points = hull.Points.ToList();
@@ -287,7 +420,7 @@ public class VoronoiTest3D : MonoBehaviour
 
         //draw cube boundaries 
         Gizmos.color = Color.gray;
-        Gizmos.DrawWireCube(cube_bounds.center, cube_bounds.size);
+        Gizmos.DrawWireCube(object_bounds.center, object_bounds.size);
 
         //draws green spheres at the position of voronoi sites
         Gizmos.color = Color.green;
@@ -327,13 +460,184 @@ public class VoronoiTest3D : MonoBehaviour
         Gizmos.matrix = Matrix4x4.identity;
     }
 
+    List<Polygon> MeshToPolygons(Mesh mesh)
+    {
+        List<Polygon> polygons = new List<Polygon>();
+        Vector3[] verts = mesh.vertices;
+        int[] tris = mesh.triangles;
+
+        //each triangle in mesh is turned into 1 polygon
+        for (int i = 0; i < tris.Length; i += 3)
+        {
+            Vector3 a = verts[tris[i]];
+            Vector3 b = verts[tris[i + 1]];
+            Vector3 c = verts[tris[i + 2]];
+
+            List<Vector3> tri_vertices = new List<Vector3> { a, b, c };
+
+            //convert 3 verts into a polygon
+            Polygon polygon = PolygonFactory.ConstructPolygon(tri_vertices, true);
+
+            if (polygon != null)
+            {
+                polygons.Add(polygon);
+            }
+            else
+            {
+                Debug.LogWarning("Failed to create polygon, check MeshToPolygons.");
+            }
+        }
+
+
+        return polygons;
+    }
+
     bool IsPointInsideBounds(Vector3 point, Bounds bounds)
     {
         //extend bounds slightly to account for floating point errors in calculating voronoi edges?
-        float tolerance = 0.01f; 
+        float tolerance = 0.01f;
         Bounds extented_bounds = bounds;
         extented_bounds.Expand(tolerance);
 
         return extented_bounds.Contains(point);
+    }
+
+    private List<plane_data> GetPlanesFromMesh(Mesh mesh)
+    {
+        List<plane_data> planes = new List<plane_data>();
+        Vector3[] verts = mesh.vertices;
+        int[] tris = mesh.triangles;
+        //set of 3 indices = 1 triangle
+        for (int i = 0; i < tris.Length; i += 3)
+        {
+            Vector3 v0 = verts[tris[i]];
+            Vector3 v1 = verts[tris[i + 1]];
+            Vector3 v2 = verts[tris[i + 2]];
+            //compute normal
+            Vector3 normal = Vector3.Cross(v1 - v0, v2 - v0).normalized;
+            //compute plane distance
+            float distance = -Vector3.Dot(normal, v0);
+
+            planes.Add(new plane_data
+            {
+                normal = normal,
+                distance = distance
+            });
+        }
+        return planes;
+    }
+
+    private Polyhedron MeshToPolyhedron(Mesh mesh)
+    {
+        Polyhedron polyhedron = new Polyhedron();
+        Vector3[] verts = mesh.vertices;
+        int[] tris = mesh.triangles;
+
+        //one triangle = one Polygon3D
+        for (int i = 0; i < tris.Length; i += 3)
+        {
+            Vector3 v0 = verts[tris[i]];
+            Vector3 v1 = verts[tris[i + 1]];
+            Vector3 v2 = verts[tris[i + 2]];
+
+            Polygon3D face = new Polygon3D(new List<Vector3> { v0, v1, v2 });
+            polyhedron.faces.Add(face);
+        }
+        return polyhedron;
+    }
+
+    private Polygon3D ClipPolygonAgainstPlane(Polygon3D poly, Vector3 plane_normal, float plane_distance)
+    {
+        List<Vector3> output_verts = new List<Vector3>();
+        int count = poly.vertices.Count;
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 current = poly.vertices[i];
+            Vector3 next = poly.vertices[(i + 1) % count];
+
+            float current_distance = Vector3.Dot(plane_normal, current) + plane_distance;
+            float next_distance = Vector3.Dot(plane_normal, next) + plane_distance;
+
+            bool current_inside = (current_distance <= 0f);
+            bool next_inside = (next_distance <= 0f);
+
+            //if current vertex is inside keep it
+            if (current_inside)
+            {
+                output_verts.Add(current);
+            }
+
+            //if edge crosses plane get point of intersection
+            if (current_inside != next_inside)
+            {
+                float t = current_distance / (current_distance - next_distance);
+                Vector3 intersection = Vector3.Lerp(current, next, t);
+                output_verts.Add(intersection);
+            }
+        }
+
+        return new Polygon3D(output_verts);
+    }
+
+    private Polyhedron ClipPolyhedronAgainstPlane(Polyhedron polyhedron, Vector3 plane_normal, float plane_distance)
+    {
+        Polyhedron clipped_polyhedron = new Polyhedron();
+        foreach (Polygon3D face in polyhedron.faces)
+        {
+            Polygon3D clipped = ClipPolygonAgainstPlane(face, plane_normal, plane_distance);
+
+            //if clipped polygon has >=3 vertices it is a valid face
+            if (clipped.vertices.Count >= 3)
+            {
+                clipped_polyhedron.faces.Add(clipped);
+            }
+        }
+        return clipped_polyhedron;
+    }
+
+    private Polyhedron ClipPolyhedronAgainstObjectPlanes(Polyhedron fragment_polyhedron, List<plane_data> object_planes)
+    {
+        Polyhedron current_polyhedron = fragment_polyhedron;
+        foreach (plane_data plane in object_planes)
+        {
+            current_polyhedron = ClipPolyhedronAgainstPlane(current_polyhedron, plane.normal, plane.distance);
+            if (current_polyhedron.faces.Count == 0)
+            {
+                //entire fragment was clipped cause out of bounds
+                break;
+            }
+        }
+        return current_polyhedron;
+    }
+
+    private Mesh BuildMeshFromPolyhedron(Polyhedron poly)
+    {
+        List<Vector3> verts = new List<Vector3>();
+        List<int> triangles = new List<int>();
+        int index_offset = 0;
+
+        foreach (Polygon3D face in poly.faces)
+        {
+            if (face.vertices.Count < 3) continue;
+
+            //triangle fan approch for triangulation of convex face for each polygon
+            for (int i = 1; i < face.vertices.Count - 1; i++)
+            {
+                verts.Add(face.vertices[0]);
+                verts.Add(face.vertices[i]);
+                verts.Add(face.vertices[i + 1]);
+
+                triangles.Add(index_offset);
+                triangles.Add(index_offset + 1);
+                triangles.Add(index_offset + 2);
+                index_offset += 3;
+            }
+        }
+
+        Mesh clipped_mesh = new Mesh();
+        clipped_mesh.vertices = verts.ToArray();
+        clipped_mesh.triangles = triangles.ToArray();
+        clipped_mesh.RecalculateNormals();
+        return clipped_mesh;
     }
 }

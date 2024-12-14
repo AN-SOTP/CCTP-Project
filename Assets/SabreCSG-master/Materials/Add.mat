@@ -26,7 +26,8 @@ Material:
     m_Ints: []
     m_Floats:
     - _FaceToggle: 1
-    - _GridSize: 0.5
+    - _GridAlpha: 0.3
+    - _GridSize: 1
     - _GridStrength: 0.3
     - _GridThickness: 0.03
     - _GridToggle: 1

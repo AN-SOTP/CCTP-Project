@@ -32,7 +32,7 @@ public class VoronoiCell : TriangulationCell<VoronoiVertex, VoronoiCell>
 
     private Vector3 CalculateCircumcenter(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
     {
-        // Shift coordinate system so that point d is at the origin
+        //shift coordinate system so that point d is at the origin
         Vector3 a0 = a - d;
         Vector3 b0 = b - d;
         Vector3 c0 = c - d;
@@ -50,7 +50,7 @@ public class VoronoiCell : TriangulationCell<VoronoiVertex, VoronoiCell>
 
         if (Mathf.Abs(denominator) < Mathf.Epsilon)
         {
-            // Degenerate case; return the centroid as an approximation
+            //Degenerate case; return the centroid as an approximation
             return (a + b + c + d) / 4f;
         }
 
