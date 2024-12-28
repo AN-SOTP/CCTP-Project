@@ -7,6 +7,7 @@ using Sabresaurus;
 using Sabresaurus.SabreCSG;
 using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.UIElements;
 using static VoronoiTest3D;
 
 //[ExecuteInEditMode]
@@ -26,8 +27,6 @@ public class VoronoiTest3D : MonoBehaviour
     //mapping from the original site positions to their corresponding VoronoiVertex
     private Dictionary<Vector3, VoronoiVertex> site_to_vertex_map;
 
-    //CSGModel csg_model;
-    //private PrimitiveBrush object_brush;
 
     [System.Serializable]
     public struct plane_data
@@ -40,69 +39,50 @@ public class VoronoiTest3D : MonoBehaviour
 
     private bool fractured = false;
 
-    // Start is called before the first frame update
+    /// <summary>
+    /// Represents a line segment in 3D: intersection of a face's edge with the clipping plane.
+    /// </summary>
+    public struct Edge3D
+    {
+        public Vector3 start;
+        public Vector3 end;
+        public Edge3D(Vector3 s, Vector3 e)
+        {
+            start = s;
+            end = e;
+        }
+    }
+
     void Start()
     {
-
+        MeshFilter mesh_filter = GetComponent<MeshFilter>();
+        if (mesh_filter == null)
+        {
+            Debug.LogWarning("No MeshFilter found on this GameObject!");
+            mesh_filter = gameObject.AddComponent<MeshFilter>();
+            //return;
+        }
         Mesh object_mesh = GetComponent<MeshFilter>().sharedMesh;
         if (object_mesh == null)
         {
-            Debug.LogError("No mesh filter on this game object!");
+            Debug.LogError("No mesh from mesh filter!");
             return;
         }
 
         MeshCollider mesh_collider = GetComponent<MeshCollider>();
         if (mesh_collider == null)
         {
-            Debug.LogError("No mesh collider on this game object! Adding one.");
+            Debug.LogWarning("No mesh collider on this game object! Adding one.");
             mesh_collider = gameObject.AddComponent<MeshCollider>();
         }
         mesh_collider.sharedMesh = object_mesh;
-        mesh_collider.convex = false;
+        mesh_collider.convex = false; //what the fuck?
 
         //print number of triangle of mesh
         Debug.Log(Equals(object_mesh.triangles.Length, 0) ? "No triangles in mesh" : "Number of triangles in mesh: " + object_mesh.triangles.Length);
 
         object_planes = GetPlanesFromMesh(object_mesh);
         Debug.Log("Extracted " + object_planes.Count + " planes from object mesh.");
-
-        /*
-        List<Polygon> polygons = MeshToPolygons(object_mesh);
-        if (polygons == null || polygons.Count == 0)
-        {
-            Debug.LogError("Failed to create polygons from mesh");
-            return;
-        }
-        Polygon[] polygon_array = polygons.ToArray();
-        Mesh polygon_mesh = new Mesh();
-        List<int> polygon_indices;
-
-        BrushFactory.GenerateMeshFromPolygons(polygon_array, ref polygon_mesh, out polygon_indices);
-
-        GameObject object_brushGO = new GameObject("MeshBrush");
-        object_brush = object_brushGO.AddComponent<PrimitiveBrush>();
-        object_brush.SetPolygons(polygon_array, true);
-        object_brush.Invalidate(true);
-
-        CSGModel csg_model = FindObjectOfType<CSGModel>();
-        if (csg_model == null)
-        {
-            GameObject modelGO = new GameObject("CSGModel");
-            csg_model = modelGO.AddComponent<CSGModel>();
-        }
-        csg_model.transform.SetParent(transform);
-        csg_model.transform.localPosition = Vector3.zero;
-        csg_model.transform.localRotation = Quaternion.identity;
-        csg_model.transform.localScale = Vector3.one;
-
-        object_brushGO.transform.SetParent(csg_model.transform);
-        object_brushGO.transform.localPosition = Vector3.zero;
-        object_brushGO.transform.localRotation = Quaternion.identity;
-        object_brushGO.transform.localScale = Vector3.one;
-        
-        csg_model.Build(false, true);
-
-        object_brushGO.transform.parent = this.transform;*/
 
         //generate sites!
         GenerateVoronoiSites();
@@ -116,10 +96,18 @@ public class VoronoiTest3D : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        if (!fractured && Input.GetKeyDown(KeyCode.F))
+        if (!fractured && Input.GetMouseButtonDown(0))
         {
-            Fracture();
-            fractured = true;
+            Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+            RaycastHit hit;
+            if (Physics.Raycast(ray, out hit))
+            {
+                if (hit.transform == transform)
+                {
+                    Fracture();
+                    fractured = true;
+                }
+            }
         }
     }
 
@@ -156,48 +144,6 @@ public class VoronoiTest3D : MonoBehaviour
             float z = UnityEngine.Random.Range(min.z, max.z);
             voronoi_sites.Add(new Vector3(x, y, z));
         }
-
-        /*
-        Vector3[] corners = new Vector3[8];
-        int index = 0;
-        for (int x = 0; x <= 1; x++)
-        {
-            for (int y = 0; y <= 1; y++)
-            {
-                for (int z = 0; z <= 1; z++)
-                {
-                    corners[index++] = new Vector3(
-                    x == 0 ? min.x : max.x,
-                    y == 0 ? min.y : max.y,
-                    z == 0 ? min.z : max.z
-                    );
-                }
-            }
-        }
-        voronoi_sites.AddRange(corners);
-
-        List<Vector3> edgeMidpoints = new List<Vector3>
-        {
-            // bottom face edges (z = min.z)
-            new Vector3((min.x+max.x)*0.5f, min.y, min.z),
-            new Vector3(min.x, (min.y+max.y)*0.5f, min.z),
-            new Vector3((min.x+max.x)*0.5f, max.y, min.z),
-            new Vector3(max.x, (min.y+max.y)*0.5f, min.z),
-
-            // top face edges (z = max.z)
-            new Vector3((min.x+max.x)*0.5f, min.y, max.z),
-            new Vector3(min.x, (min.y+max.y)*0.5f, max.z),
-            new Vector3((min.x+max.x)*0.5f, max.y, max.z),
-            new Vector3(max.x, (min.y+max.y)*0.5f, max.z),
-
-            // vertical edges connecting top and bottom faces
-            new Vector3(min.x, min.y, (min.z+max.z)*0.5f),
-            new Vector3(min.x, max.y, (min.z+max.z)*0.5f),
-            new Vector3(max.x, min.y, (min.z+max.z)*0.5f),
-            new Vector3(max.x, max.y, (min.z+max.z)*0.5f)
-        };
-
-        voronoi_sites.AddRange(edgeMidpoints);*/
     }
 
     void GenerateVoronoiDiagram()
@@ -282,47 +228,6 @@ public class VoronoiTest3D : MonoBehaviour
         Mesh clipped_mesh = BuildMeshFromPolyhedron(clipped_polyhedron);
         //and then instantiate as a fragment game object
         CreateFragmentGameObject(clipped_mesh);
-
-        //SabreCSG stuff PAUSED
-        /*
-        Mesh fragment_mesh = CreateMeshFromCircumcenters(circumcenters);
-        List<Polygon> fragment_polygons = MeshToPolygons(fragment_mesh);
-        if(fragment_polygons == null || fragment_polygons.Count == 0)
-        {
-            Debug.LogError("Failed to create polygons from fragment mesh (made from voronoi cell)");
-        }
-        Polygon[] fragment_polygon_array = fragment_polygons.ToArray();
-
-        Mesh fragment_polygon_mesh = new Mesh();
-        List<int> fragment_polygon_indices;
-        BrushFactory.GenerateMeshFromPolygons(fragment_polygon_array, ref fragment_polygon_mesh, out fragment_polygon_indices);
-
-        GameObject fragment_brushGO = new GameObject("VoroFragmentBrush");
-        PrimitiveBrush fragment_brush = fragment_brushGO.AddComponent<PrimitiveBrush>();
-        fragment_brush.SetPolygons(fragment_polygon_array, true);
-        fragment_brush.Invalidate(true);
-
-        //create temp CSGmodel for fragment or else we can't perform any operations (i think)
-        GameObject fragment_modelGO = new GameObject("VoroFragmentModel");
-        CSGModel fragment_model = fragment_modelGO.AddComponent<CSGModel>();
-
-        fragment_modelGO.transform.SetParent(transform);
-        fragment_modelGO.transform.localPosition = Vector3.zero;
-        fragment_modelGO.transform.localRotation = Quaternion.identity;
-        fragment_modelGO.transform.localScale = Vector3.one;
-
-        fragment_brushGO.transform.SetParent(fragment_model.transform);
-        fragment_brushGO.transform.localPosition = Vector3.zero;
-        fragment_brushGO.transform.localRotation = Quaternion.identity;
-        fragment_brushGO.transform.localScale = Vector3.one;
-
-        fragment_model.Build(false, true);
-
-        //now that we have a model and brush for the fragment, time to figure out how to peform clipping :(
-        //CSGModel clipped_model = */
-
-        //Mesh cell_mesh = CreateMeshFromCircumcenters(circumcenters);
-        //CreateFragmentGameObject(cell_mesh);
     }
 
     Mesh CreateMeshFromCircumcenters(List<Vector3> points)
@@ -545,7 +450,6 @@ public class VoronoiTest3D : MonoBehaviour
         }
         return polyhedron;
     }
-
     private Polygon3D ClipPolygonAgainstPlane(Polygon3D poly, Vector3 plane_normal, float plane_distance)
     {
         List<Vector3> output_verts = new List<Vector3>();
@@ -579,6 +483,7 @@ public class VoronoiTest3D : MonoBehaviour
         return new Polygon3D(output_verts);
     }
 
+
     private Polyhedron ClipPolyhedronAgainstPlane(Polyhedron polyhedron, Vector3 plane_normal, float plane_distance)
     {
         Polyhedron clipped_polyhedron = new Polyhedron();
@@ -610,6 +515,60 @@ public class VoronoiTest3D : MonoBehaviour
         return current_polyhedron;
     }
 
+    private Vector3 ComputeFaceNormal(Polygon3D face)
+    {
+        if (face.vertices.Count < 3)
+        {
+            return Vector3.zero;
+        }
+        Vector3 v0 = face.vertices[0];
+        Vector3 v1 = face.vertices[1];
+        Vector3 v2 = face.vertices[2];
+        //cross product of v1-v0 and v2-v0
+        Vector3 normal = Vector3.Cross(v1 - v0, v2 - v0).normalized;
+        return normal;
+    }
+
+    private void SortPolygonVerts(Polygon3D face)
+    {
+        Vector3 centroid = Vector3.zero;
+        foreach (var vec in face.vertices)
+        {
+            centroid += vec;
+        }
+        centroid /= face.vertices.Count;
+
+        Vector3 normal = ComputeFaceNormal(face);
+        if (normal == Vector3.zero)
+        {
+            return;
+        }
+
+        //project onto a plane, if normal = (0,0,1) then project x,y
+        //if normal is arbitrary (not aligned with the standard x, y, or z axes), choose an orthonormal basis
+        Vector3 u = Vector3.Cross(normal, Vector3.up);
+        if (u.sqrMagnitude < 1e-6f)
+            u = Vector3.Cross(normal, Vector3.right);
+        u.Normalize();
+        Vector3 v = Vector3.Cross(normal, u);
+
+        List<(Vector3 vertex, float angle)> angled_verts = new List<(Vector3 vertex, float angle)>();
+        foreach (var vertex in face.vertices)
+        {
+            Vector3 relative = vertex - centroid;
+            //project relative vector onto u,v plane
+            float x = Vector3.Dot(relative, u);
+            float y = Vector3.Dot(relative, v);
+
+            float angle = Mathf.Atan2(y, x);
+            angled_verts.Add((vertex, angle));
+        }
+
+        //sort by angle and then update face vertices in this order
+        angled_verts.Sort((a, b) => a.angle.CompareTo(b.angle));
+        face.vertices = angled_verts.Select(x => x.vertex).ToList();
+    }
+
     private Mesh BuildMeshFromPolyhedron(Polyhedron poly)
     {
         List<Vector3> verts = new List<Vector3>();
@@ -620,7 +579,11 @@ public class VoronoiTest3D : MonoBehaviour
         {
             if (face.vertices.Count < 3) continue;
 
+            SortPolygonVerts(face);
+
+            /*
             //triangle fan approch for triangulation of convex face for each polygon
+            //if still fucked look into ear clipping algorithm
             for (int i = 1; i < face.vertices.Count - 1; i++)
             {
                 verts.Add(face.vertices[0]);
@@ -631,6 +594,36 @@ public class VoronoiTest3D : MonoBehaviour
                 triangles.Add(index_offset + 1);
                 triangles.Add(index_offset + 2);
                 index_offset += 3;
+            }*/
+
+            // 2) Compute face normal
+            Vector3 faceNormal = ComputeFaceNormal(face);
+            if (faceNormal == Vector3.zero || face.vertices.Count < 3)
+                continue;
+
+            // 3) Confirm CCW orientation
+            if (!EarClippingTriangulation.IsCCW(face.vertices, faceNormal))
+            {
+                // Flip to ensure CCW
+                face.vertices.Reverse();
+            }
+
+            // 4) Ear-clip to get local triangle indices
+            List<int> localTriangles = EarClippingTriangulation.Triangulate(face.vertices, faceNormal);
+            if (localTriangles.Count < 3)
+            {
+                // Possibly we couldn't triangulate this polygon
+                continue;
+            }
+
+            // 5) Add the face's vertices to finalVerts
+            int baseIndex = verts.Count;
+            verts.AddRange(face.vertices);
+
+            // 6) Add each of ear clipping's triangle indices offset by baseIndex
+            for (int i = 0; i < localTriangles.Count; i++)
+            {
+                triangles.Add(baseIndex + localTriangles[i]);
             }
         }
 
