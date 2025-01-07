@@ -292,6 +292,12 @@ public class VoronoiTest3D : MonoBehaviour
             mesh_renderer.sharedMaterial = GetComponent<MeshRenderer>().sharedMaterial;
         }
 
+        //turn off culling for debug purposes
+        //Material debug_mat = new Material(Shader.Find("Standard"));
+        //debug_mat.SetInt("_CullMode", (int)UnityEngine.Rendering.CullMode.Off);
+        //mesh_renderer.sharedMaterial = debug_mat;
+
+
         MeshCollider mesh_collider = fragment.AddComponent<MeshCollider>();
         mesh_collider.sharedMesh = mesh;
         mesh_collider.convex = true;
@@ -316,53 +322,6 @@ public class VoronoiTest3D : MonoBehaviour
                 rigidbody.AddExplosionForce(50f, transform.position, 1f);
             }
         }
-    }
-
-    private void OnDrawGizmos()
-    {
-        //set Gizmos matrix to the cube's transform, so all gizmos drawn are relative to the cube in world space
-        Gizmos.matrix = transform.localToWorldMatrix;
-
-        //draw cube boundaries 
-        Gizmos.color = Color.gray;
-        Gizmos.DrawWireCube(object_bounds.center, object_bounds.size);
-
-        //draws green spheres at the position of voronoi sites
-        Gizmos.color = Color.green;
-        foreach (var site in voronoi_sites)
-        {
-            Gizmos.DrawSphere(site, 0.02f);
-        }
-
-        //draw voronoi edges. red lines represent edges of the diagram between finite cells, blue spheres are drawn at circumcenter of finite cells
-        //for edges, iterate over each edge in the voronoi mesh. if both source and target cells of edge are within the cube
-        //then draw a line between the circumcenters of the source and target cells
-        if (voronoi_mesh != null && finite_cells != null)
-        {
-            Gizmos.color = Color.red;
-
-            foreach (var edge in voronoi_mesh.Edges)
-            {
-                // Only draw edges between finite cells
-                if (finite_cells.Contains(edge.Source) && finite_cells.Contains(edge.Target))
-                {
-                    Vector3 start = edge.Source.Circumcenter;
-                    Vector3 end = edge.Target.Circumcenter;
-
-                    Gizmos.DrawLine(start, end);
-                }
-            }
-
-            //draw the circumcenters of finite cells (cells in bounds, optional)
-            Gizmos.color = Color.blue;
-            foreach (var cell in finite_cells)
-            {
-                Gizmos.DrawSphere(cell.Circumcenter, 0.01f);
-            }
-        }
-
-        //resets the matrix set at the start of function to not affect other gizmos drawn in the scene (for example 2d test square currently in scene).
-        Gizmos.matrix = Matrix4x4.identity;
     }
 
     List<Polygon> MeshToPolygons(Mesh mesh)
@@ -495,7 +454,7 @@ public class VoronoiTest3D : MonoBehaviour
                 output_verts.Add(intersection);
 
                 //track intrsection edges for capping
-                if(!previous_intersection.HasValue)
+                if (!previous_intersection.HasValue)
                 {
                     //haven't stored an intersection yet so store it
                     previous_intersection = intersection;
@@ -556,28 +515,15 @@ public class VoronoiTest3D : MonoBehaviour
         Polyhedron current_polyhedron = fragment_polyhedron;
         foreach (plane_data plane in object_planes)
         {
-            current_polyhedron = ClipPolyhedronAgainstPlane(current_polyhedron, plane.normal, plane.distance);
+            current_polyhedron = ClipPolyhedronAgainstPlaneWithCaps(current_polyhedron, plane.normal, plane.distance);
+
             if (current_polyhedron.faces.Count == 0)
             {
-                //entire fragment was clipped cause out of bounds
+                Debug.LogWarning("clipping resulted in empty polyhedron.");
                 break;
             }
         }
         return current_polyhedron;
-    }
-
-    private Vector3 ComputeFaceNormal(Polygon3D face)
-    {
-        if (face.vertices.Count < 3)
-        {
-            return Vector3.zero;
-        }
-        Vector3 v0 = face.vertices[0];
-        Vector3 v1 = face.vertices[1];
-        Vector3 v2 = face.vertices[2];
-        //cross product of v1-v0 and v2-v0
-        Vector3 normal = Vector3.Cross(v1 - v0, v2 - v0).normalized;
-        return normal;
     }
 
     private void SortPolygonVerts(Polygon3D face)
@@ -589,8 +535,8 @@ public class VoronoiTest3D : MonoBehaviour
         }
         centroid /= face.vertices.Count;
 
-        Vector3 normal = ComputeFaceNormal(face);
-        if(normal == Vector3.zero)
+        Vector3 normal = PolyhedronCleanup.ComputeFaceNormal(face);
+        if (normal == Vector3.zero)
         {
             return;
         }
@@ -604,7 +550,7 @@ public class VoronoiTest3D : MonoBehaviour
         Vector3 v = Vector3.Cross(normal, u);
 
         List<(Vector3 vertex, float angle)> angled_verts = new List<(Vector3 vertex, float angle)>();
-        foreach(var vertex in face.vertices)
+        foreach (var vertex in face.vertices)
         {
             Vector3 relative = vertex - centroid;
             //project relative vector onto u,v plane
@@ -622,11 +568,14 @@ public class VoronoiTest3D : MonoBehaviour
 
     private Mesh BuildMeshFromPolyhedron(Polyhedron poly)
     {
+        PolyhedronCleanup.FinalizePolyhedron(poly, 1e-4f); //1e-5f, 1e-6f, 1e-4f
+
+        //convert each face to triangles
         List<Vector3> verts = new List<Vector3>();
         List<int> triangles = new List<int>();
-        int index_offset = 0;
+        //int index_offset = 0;
 
-        foreach (Polygon3D face in poly.faces)
+        foreach (var face in poly.faces)
         {
             if (face.vertices.Count < 3) continue;
 
@@ -647,19 +596,17 @@ public class VoronoiTest3D : MonoBehaviour
                 index_offset += 3;
             }*/
 
-            // 2) Compute face normal
-            Vector3 faceNormal = ComputeFaceNormal(face);
+            Vector3 faceNormal = PolyhedronCleanup.ComputeFaceNormal(face);
             if (faceNormal == Vector3.zero || face.vertices.Count < 3)
                 continue;
 
-            // 3) Confirm CCW orientation
-            if (!EarClippingTriangulation.IsCCW(face.vertices, faceNormal))
+            /*if (!EarClippingTriangulation.IsCCW(face.vertices, faceNormal))
             {
                 // Flip to ensure CCW
                 face.vertices.Reverse();
-            }
+            }*/
 
-            // 4) Ear-clip to get local triangle indices
+            //ear clipping
             List<int> localTriangles = EarClippingTriangulation.Triangulate(face.vertices, faceNormal);
             if (localTriangles.Count < 3)
             {
@@ -667,11 +614,9 @@ public class VoronoiTest3D : MonoBehaviour
                 continue;
             }
 
-            // 5) Add the face's vertices to finalVerts
             int baseIndex = verts.Count;
             verts.AddRange(face.vertices);
 
-            // 6) Add each of ear clipping's triangle indices offset by baseIndex
             for (int i = 0; i < localTriangles.Count; i++)
             {
                 triangles.Add(baseIndex + localTriangles[i]);
@@ -684,4 +629,81 @@ public class VoronoiTest3D : MonoBehaviour
         clipped_mesh.RecalculateNormals();
         return clipped_mesh;
     }
+
+    private Polyhedron ClipPolyhedronAgainstPlaneWithCaps(Polyhedron polyhedron, Vector3 plane_normal, float plane_distance
+)
+    {
+        // 1) Clip
+        List<Edge3D> intersection_edges;
+        Polyhedron clipped = ClipPolyhedronAgainstPlane(polyhedron, plane_normal, plane_distance, out intersection_edges
+        );
+
+        // 2) Build loops from intersectionEdges
+        List<List<Vector3>> loops = CappingUtilities.BuildRobustCapLoops(intersection_edges, 1e-4f); //1e-5f, 1e-6f, 1e-4f
+
+        // 3) For each loop, create a cap face
+        foreach (var loop in loops)
+        {
+            if (loop.Count < 3)
+                continue; // skip degenerate
+
+            Polygon3D cap_face = new Polygon3D(loop);
+
+            // Optionally ensure orientation (dot w/ planeNormal) is correct
+            // If needed: compute face normal & reverse if negative
+
+            clipped.faces.Add(cap_face);
+        }
+
+        return clipped;
+    }
+
+
+    private void OnDrawGizmos()
+    {
+        //set Gizmos matrix to the cube's transform, so all gizmos drawn are relative to the cube in world space
+        Gizmos.matrix = transform.localToWorldMatrix;
+
+        //draw cube boundaries 
+        Gizmos.color = Color.gray;
+        Gizmos.DrawWireCube(object_bounds.center, object_bounds.size);
+
+        //draws green spheres at the position of voronoi sites
+        Gizmos.color = Color.green;
+        foreach (var site in voronoi_sites)
+        {
+            Gizmos.DrawSphere(site, 0.02f);
+        }
+
+        //draw voronoi edges. red lines represent edges of the diagram between finite cells, blue spheres are drawn at circumcenter of finite cells
+        //for edges, iterate over each edge in the voronoi mesh. if both source and target cells of edge are within the cube
+        //then draw a line between the circumcenters of the source and target cells
+        if (voronoi_mesh != null && finite_cells != null)
+        {
+            Gizmos.color = Color.red;
+
+            foreach (var edge in voronoi_mesh.Edges)
+            {
+                // Only draw edges between finite cells
+                if (finite_cells.Contains(edge.Source) && finite_cells.Contains(edge.Target))
+                {
+                    Vector3 start = edge.Source.Circumcenter;
+                    Vector3 end = edge.Target.Circumcenter;
+
+                    Gizmos.DrawLine(start, end);
+                }
+            }
+
+            //draw the circumcenters of finite cells (cells in bounds, optional)
+            Gizmos.color = Color.blue;
+            foreach (var cell in finite_cells)
+            {
+                Gizmos.DrawSphere(cell.Circumcenter, 0.01f);
+            }
+        }
+
+        //resets the matrix set at the start of function to not affect other gizmos drawn in the scene (for example 2d test square currently in scene).
+        Gizmos.matrix = Matrix4x4.identity;
+    }
+
 }

@@ -4,25 +4,32 @@ using UnityEngine;
 
 public static class EarClippingTriangulation
 {
-    /// <summary>
-    /// Triangulate a single planar polygon using ear clipping. 
-    /// 'verts' should be in CCW order for faceNormal, or we must ensure it.
-    /// 'faceNormal' is used to check "left turn" for convex testing.
-    /// Returns a list of triangle indices local to 'verts'.
-    /// </summary>
     public static List<int> Triangulate(List<Vector3> verts, Vector3 faceNormal)
     {
-        List<int> polygonIndices = new List<int>();
+        // (Optional) remove duplicates & collinear
+        verts = RemoveDuplicateVerts(verts, 1e-6f);
+        verts = RemoveCollinearVerts(verts, 1e-6f);
+
+        // re-check count
+        if (verts.Count < 3) return new List<int>();
+
+        // (Optional) ensure truly planar by projecting to plane
+        // This is only needed if you suspect mild 3D drift.
+        // Then re-map them to 2D coords for robust ear clipping or do "3D ear clipping."
+
+        List<int> polygonIndices = new List<int>(verts.Count);
         for (int i = 0; i < verts.Count; i++)
             polygonIndices.Add(i);
 
+        // normal ear clip
         List<int> resultTriangles = new List<int>();
+        int maxIters = 2 * polygonIndices.Count;
+        int iter = 0;
 
         while (polygonIndices.Count > 3)
         {
             bool earFound = false;
 
-            // Attempt to find an ear
             for (int i = 0; i < polygonIndices.Count; i++)
             {
                 int prev = polygonIndices[(i - 1 + polygonIndices.Count) % polygonIndices.Count];
@@ -31,12 +38,10 @@ public static class EarClippingTriangulation
 
                 if (IsEar(prev, curr, next, verts, polygonIndices, faceNormal))
                 {
-                    // We found an ear, add that triangle
+                    // Found ear
                     resultTriangles.Add(prev);
                     resultTriangles.Add(curr);
                     resultTriangles.Add(next);
-
-                    // Remove the ear vertex from the polygon
                     polygonIndices.RemoveAt(i);
                     earFound = true;
                     break;
@@ -45,14 +50,29 @@ public static class EarClippingTriangulation
 
             if (!earFound)
             {
-                // If we can't find any ear, the polygon might be self-intersecting 
-                // or floating-point issues. We'll break to avoid infinite loop
-                Debug.LogError("Ear clipping failed: no ear found. Possibly polygon is degenerate or concave in unexpected ways.");
+                // fallback or skip
+                Debug.LogError("Ear clipping failed: no ear found. Attempting fallback fan.");
+                // fallback fan:
+                if (polygonIndices.Count >= 3)
+                {
+                    for (int t = 1; t < polygonIndices.Count - 1; t++)
+                    {
+                        resultTriangles.Add(polygonIndices[0]);
+                        resultTriangles.Add(polygonIndices[t]);
+                        resultTriangles.Add(polygonIndices[t + 1]);
+                    }
+                }
+                break;
+            }
+
+            iter++;
+            if (iter > maxIters)
+            {
+                Debug.LogError("Ear clipping infinite loop. Aborting.");
                 break;
             }
         }
 
-        // If exactly three vertices remain, they form the final triangle
         if (polygonIndices.Count == 3)
         {
             resultTriangles.Add(polygonIndices[0]);
@@ -125,19 +145,80 @@ public static class EarClippingTriangulation
     // Helper to determine if polygon is CCW relative to faceNormal
     public static bool IsCCW(List<Vector3> verts, Vector3 faceNormal)
     {
-        // Simple approach: project polygon to a plane, or assume near XY if faceNormal ~Z.
-        // We'll do a minimal area check in XY after applying faceNormal sign.
-        // A more robust approach would project to faceNormal plane, but for brevity:
-        float area = 0f;
+        // 1) Compute polygon centroid
+        Vector3 centroid = Vector3.zero;
+        for (int i = 0; i < verts.Count; i++)
+            centroid += verts[i];
+        centroid /= verts.Count;
+
+        // 2) Orthonormal basis for plane
+        Vector3 u = Vector3.Cross(faceNormal, Vector3.up);
+        if (u.sqrMagnitude < 1e-6f)
+            u = Vector3.Cross(faceNormal, Vector3.right);
+        u.Normalize();
+        Vector3 v = Vector3.Cross(faceNormal, u);
+
+        // 3) Project each vertex into 2D
+        List<Vector2> projected2D = new List<Vector2>(verts.Count);
         for (int i = 0; i < verts.Count; i++)
         {
-            Vector3 v0 = verts[i];
-            Vector3 v1 = verts[(i + 1) % verts.Count];
-            // Summation of cross product in XY
-            area += (v1.x - v0.x) * (v1.y + v0.y);
+            Vector3 r = verts[i] - centroid;
+            float x = Vector3.Dot(r, u);
+            float y = Vector3.Dot(r, v);
+            projected2D.Add(new Vector2(x, y));
         }
-        // area>0 => CCW in XY. If your faceNormal is pointing "up," this is fine.
-        // For an arbitrary faceNormal, a proper plane projection might be needed.
-        return (area > 0f);
+
+        // 4) Compute the signed area in 2D
+        float area = 0f;
+        for (int i = 0; i < projected2D.Count; i++)
+        {
+            Vector2 p0 = projected2D[i];
+            Vector2 p1 = projected2D[(i + 1) % projected2D.Count];
+            area += (p1.x - p0.x) * (p1.y + p0.y);
+        }
+        // area>0 => CCW
+        return area > 0f;
+    }
+
+    private static List<Vector3> RemoveDuplicateVerts(List<Vector3> input, float eps)
+    {
+        List<Vector3> result = new List<Vector3>();
+        for (int i = 0; i < input.Count; i++)
+        {
+            bool foundDup = false;
+            for (int j = 0; j < result.Count; j++)
+            {
+                if ((input[i] - result[j]).sqrMagnitude < eps * eps)
+                {
+                    foundDup = true;
+                    break;
+                }
+            }
+            if (!foundDup) result.Add(input[i]);
+        }
+        return result;
+    }
+    private static List<Vector3> RemoveCollinearVerts(List<Vector3> input, float eps)
+    {
+        if (input.Count < 3) return input;
+        List<Vector3> result = new List<Vector3>();
+        for (int i = 0; i < input.Count; i++)
+        {
+            Vector3 prev = input[(i - 1 + input.Count) % input.Count];
+            Vector3 curr = input[i];
+            Vector3 next = input[(i + 1) % input.Count];
+
+            // cross
+            Vector3 cross = Vector3.Cross(next - curr, prev - curr);
+            if (cross.sqrMagnitude < eps * eps)
+            {
+                // skip 'curr', it's collinear
+            }
+            else
+            {
+                result.Add(curr);
+            }
+        }
+        return result;
     }
 }   

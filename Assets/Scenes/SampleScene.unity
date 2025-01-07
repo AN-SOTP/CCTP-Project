@@ -135,7 +135,7 @@ GameObject:
   - component: {fileID: 331518855}
   - component: {fileID: 331518854}
   - component: {fileID: 331518853}
-  - component: {fileID: 331518852}
+  - component: {fileID: 331518857}
   m_Layer: 0
   m_Name: Sphere
   m_TagString: Untagged
@@ -143,20 +143,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &331518852
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 331518851}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7766bcbb201bfd740b9836b9b0ad25d9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  num_of_sites: 10
-  voronoi_sites: []
 --- !u!135 &331518853
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -243,6 +229,20 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &331518857
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 331518851}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7766bcbb201bfd740b9836b9b0ad25d9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  num_of_sites: 30
+  voronoi_sites: []
 --- !u!1 &400217155
 GameObject:
   m_ObjectHideFlags: 0
@@ -673,7 +673,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7766bcbb201bfd740b9836b9b0ad25d9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  num_of_sites: 10
+  num_of_sites: 30
   voronoi_sites:
   - {x: 0.27585495, y: 0.26030588, z: -0.3299229}
   - {x: 0.3962921, y: -0.048194587, z: -0.1957025}
@@ -1007,7 +1007,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7766bcbb201bfd740b9836b9b0ad25d9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  num_of_sites: 10
+  num_of_sites: 30
   voronoi_sites: []
 --- !u!1001 &1168405193
 PrefabInstance:
