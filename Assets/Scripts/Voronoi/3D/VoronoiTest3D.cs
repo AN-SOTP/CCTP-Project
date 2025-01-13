@@ -27,6 +27,8 @@ public class VoronoiTest3D : MonoBehaviour
     //mapping from the original site positions to their corresponding VoronoiVertex
     private Dictionary<Vector3, VoronoiVertex> site_to_vertex_map;
 
+    public float fracture_epsilon = 1e-4f;
+
 
     [System.Serializable]
     public struct plane_data
@@ -607,19 +609,23 @@ public class VoronoiTest3D : MonoBehaviour
             }*/
 
             //ear clipping
-            List<int> localTriangles = EarClippingTriangulation.Triangulate(face.vertices, faceNormal);
+            /*List<int> localTriangles = EarClippingTriangulation.Triangulate(face.vertices, faceNormal);
             if (localTriangles.Count < 3)
             {
                 // Possibly we couldn't triangulate this polygon
                 continue;
-            }
+            }*/
+            List<int> local_tri_incidices = TriangulateProjected(face, faceNormal);
+            if (local_tri_incidices.Count < 3)
+                continue;
+
 
             int baseIndex = verts.Count;
             verts.AddRange(face.vertices);
 
-            for (int i = 0; i < localTriangles.Count; i++)
+            for (int i = 0; i < local_tri_incidices.Count; i++)
             {
-                triangles.Add(baseIndex + localTriangles[i]);
+                triangles.Add(baseIndex + local_tri_incidices[i]);
             }
         }
 
@@ -627,6 +633,15 @@ public class VoronoiTest3D : MonoBehaviour
         clipped_mesh.vertices = verts.ToArray();
         clipped_mesh.triangles = triangles.ToArray();
         clipped_mesh.RecalculateNormals();
+
+        // (E) Optionally skip extremely small bounding boxes
+        if (IsMeshTooSmall(clipped_mesh, 0.01f))
+        {
+            // Return an empty mesh or skip creation
+            Debug.LogWarning("Skipping a tiny fragment => won't create fragment object");
+            return new Mesh();
+        }
+
         return clipped_mesh;
     }
 
@@ -635,8 +650,7 @@ public class VoronoiTest3D : MonoBehaviour
     {
         // 1) Clip
         List<Edge3D> intersection_edges;
-        Polyhedron clipped = ClipPolyhedronAgainstPlane(polyhedron, plane_normal, plane_distance, out intersection_edges
-        );
+        Polyhedron clipped = ClipPolyhedronAgainstPlane(polyhedron, plane_normal, plane_distance, out intersection_edges);
 
         // 2) Build loops from intersectionEdges
         List<List<Vector3>> loops = CappingUtilities.BuildRobustCapLoops(intersection_edges, 1e-4f); //1e-5f, 1e-6f, 1e-4f
@@ -704,6 +718,58 @@ public class VoronoiTest3D : MonoBehaviour
 
         //resets the matrix set at the start of function to not affect other gizmos drawn in the scene (for example 2d test square currently in scene).
         Gizmos.matrix = Matrix4x4.identity;
+    }
+
+    public static List<int> TriangulateProjected(Polygon3D face, Vector3 faceNormal)
+    {
+        // Step A: compute face centroid
+        Vector3 centroid = Vector3.zero;
+        for (int i = 0; i < face.vertices.Count; i++)
+            centroid += face.vertices[i];
+        centroid /= face.vertices.Count;
+
+        // Step B: build orthonormal basis (u, v) for faceNormal
+        // We'll pick 'u' as cross( faceNormal, up ) unless it’s near collinear
+        Vector3 up = Vector3.up;
+        if (Vector3.Dot(up, faceNormal) > 0.9f)
+            up = Vector3.right;
+        // or some fallback
+
+        Vector3 u = Vector3.Cross(faceNormal, up).normalized;
+        Vector3 v = Vector3.Cross(faceNormal, u);  // guaranteed orthonormal
+
+        // Step C: project each vertex from 3D -> 2D
+        List<Vector2> projected2D = new List<Vector2>(face.vertices.Count);
+        for (int i = 0; i < face.vertices.Count; i++)
+        {
+            Vector3 r = face.vertices[i] - centroid;
+            float x = Vector3.Dot(r, u);
+            float y = Vector3.Dot(r, v);
+            projected2D.Add(new Vector2(x, y));
+        }
+
+        // Step D: ear-clip in 2D
+        List<int> localTriIndices2D = EarClippingTriangulation2D.Triangulate2D(projected2D);
+
+        // Step E: now we have indices referencing projected2D. We need to map them back
+        // But actually we only need the ordering, because we'll add them to the final mesh 
+        // in the same order we see them.
+
+        // We'll return localTriIndices2D. 
+        // The final code that calls this will know "face.vertices" in the same index order as projected2D.
+        // i.e., face.vertices[i] -> projected2D[i].
+
+        return localTriIndices2D;
+    }
+
+    private bool IsMeshTooSmall(Mesh m, float minSize)
+    {
+        Bounds b = m.bounds;
+        if (b.size.x < minSize && b.size.y < minSize && b.size.z < minSize)
+        {
+            return true;
+        }
+        return false;
     }
 
 }

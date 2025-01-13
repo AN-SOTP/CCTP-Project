@@ -3,7 +3,7 @@ using UnityEngine;
 
 public static class PolyhedronCleanup
 {
-    public static void FinalizePolyhedron(Polyhedron poly, float epsilon = 1e-4f) //1e-5f, 1e-6f, 1e-4f
+    public static void FinalizePolyhedron(Polyhedron poly, float epsilon = 1e-3f) //1e-5f, 1e-6f, 1e-4f
     {
         RemoveDegeneratePolygons(poly, epsilon);
         RemoveDuplicateFaces(poly, epsilon);
