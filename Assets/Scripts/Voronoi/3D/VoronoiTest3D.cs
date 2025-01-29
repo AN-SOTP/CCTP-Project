@@ -333,38 +333,6 @@ public class VoronoiTest3D : MonoBehaviour
         }
     }
 
-    List<Polygon> MeshToPolygons(Mesh mesh)
-    {
-        List<Polygon> polygons = new List<Polygon>();
-        Vector3[] verts = mesh.vertices;
-        int[] tris = mesh.triangles;
-
-        //each triangle in mesh is turned into 1 polygon
-        for (int i = 0; i < tris.Length; i += 3)
-        {
-            Vector3 a = verts[tris[i]];
-            Vector3 b = verts[tris[i + 1]];
-            Vector3 c = verts[tris[i + 2]];
-
-            List<Vector3> tri_vertices = new List<Vector3> { a, b, c };
-
-            //convert 3 verts into a polygon
-            Polygon polygon = PolygonFactory.ConstructPolygon(tri_vertices, true);
-
-            if (polygon != null)
-            {
-                polygons.Add(polygon);
-            }
-            else
-            {
-                Debug.LogWarning("Failed to create polygon, check MeshToPolygons.");
-            }
-        }
-
-
-        return polygons;
-    }
-
     bool IsPointInsideBounds(Vector3 point, Bounds bounds)
     {
         //extend bounds slightly to account for floating point errors in calculating voronoi edges?
@@ -419,201 +387,7 @@ public class VoronoiTest3D : MonoBehaviour
         return polyhedron;
     }
 
-    /// <summary>
-    /// Clips a single 3D polygon (face) against a plane,
-    /// returning the clipped polygon and the intersection edges
-    /// on that plane.
-    /// </summary>
-    /// <param name="poly">The polygon to be clipped</param>
-    /// <param name="plane_normal">Plane normal</param>
-    /// <param name="plane_distance">Distance 'd' in n·x + d=0</param>
-    /// <param name="out_edges">Output: intersection line segments on this face's boundary</param>
-    private Polygon3D ClipPolygonAgainstPlane(Polygon3D poly, Vector3 plane_normal, float plane_distance, out List<Edge3D> out_edges)
-    {
-        out_edges = new List<Edge3D>();
-
-        List<Vector3> output_verts = new List<Vector3>();
-        int count = poly.vertices.Count;
-        //track last intersection point to form segments as the plane can cut multipled edges of the face
-        Vector3? previous_intersection = null;
-
-
-        for (int i = 0; i < count; i++)
-        {
-            Vector3 current = poly.vertices[i];
-            Vector3 next = poly.vertices[(i + 1) % count];
-
-            float current_distance = Vector3.Dot(plane_normal, current) + plane_distance;
-            float next_distance = Vector3.Dot(plane_normal, next) + plane_distance;
-
-            bool current_inside = (current_distance <= 0f);
-            bool next_inside = (next_distance <= 0f);
-
-            //if current vertex is inside keep it
-            if (current_inside)
-            {
-                output_verts.Add(current);
-            }
-
-            //if edge crosses plane get point of intersection
-            if (current_inside != next_inside)
-            {
-                float t = current_distance / (current_distance - next_distance);
-                Vector3 intersection = Vector3.Lerp(current, next, t);
-                output_verts.Add(intersection);
-
-                //track intrsection edges for capping
-                if (!previous_intersection.HasValue)
-                {
-                    //haven't stored an intersection yet so store it
-                    previous_intersection = intersection;
-                }
-                else
-                {
-                    //we have a stored intersection, create a segment from previous_intersection to this one
-                    Edge3D segment = new Edge3D(previous_intersection.Value, intersection);
-                    out_edges.Add(segment);
-
-                    //reset previous_intersection so next intersection forms a new segment
-                    previous_intersection = null;
-                }
-            }
-        }
-
-        // If we ended with a single intersection in previous_intersection, 
-        // it means there's an odd number of intersections, typically means degenerate or partial plane pass.
-        // Usually in a well-formed scenario, plane intersects edges in pairs, producing closed segments.
-        // This edge case can be handled here.
-
-        return new Polygon3D(output_verts);
-    }
-
-    /// <summary>
-    /// A stricter approach to clipping a 3D polygon (face) against a plane,
-    /// only accepting intersections that produce exactly 0 or 2 crossing points.
-    /// If 0 and the face is "inside," we keep the original face as-is; 
-    /// if 2, we produce a clipped face. Otherwise, we discard the face entirely.
-    /// 
-    /// out_edges will contain 0 or 1 line-segment if 2 intersections were found.
-    /// </summary>
-    private Polygon3D StrictClipPolygonAgainstPlane(Polygon3D face, Vector3 planeNormal, float planeDistance, float epsilon, out List<Edge3D> outEdges)
-    {
-        outEdges = new List<Edge3D>();
-
-        // 1) Quick check: Are all vertices "inside" or "outside" the plane?
-        //    We'll track sign of distance to plane. If sign never changes, no intersection.
-        int insideCount = 0;
-        int outsideCount = 0;
-
-        var distances = new float[face.vertices.Count];
-        for (int i = 0; i < face.vertices.Count; i++)
-        {
-            float dist = Vector3.Dot(planeNormal, face.vertices[i]) + planeDistance;
-            distances[i] = dist;
-            if (dist < -epsilon)
-                insideCount++;
-            else if (dist > epsilon)
-                outsideCount++;
-            else
-            {
-                // "on-plane" or near-plane point can be considered inside or out depending on your needs
-                // We'll treat it as inside for now:
-                insideCount++;
-            }
-        }
-
-        // If 0 or all are inside => the face doesn't intersect the plane 
-        // but is inside => keep as-is, with 0 intersection edges.
-        // If 0 or all are outside => the face is fully out => discard => return empty polygon.
-        // "Strict" approach: 
-        if (outsideCount == face.vertices.Count)
-        {
-            // face fully out => discard
-            return new Polygon3D(); // empty => means we skip
-        }
-        if (insideCount == face.vertices.Count)
-        {
-            // face fully in => keep entire face, no intersection edges
-            return face;
-        }
-
-        // 2) There's partial intersection => we expect exactly 2 crossing points. 
-        // Let's do the normal "clip" procedure but track how many times we cross.
-
-        int intersectionCount = 0;
-        List<Vector3> newVerts = new List<Vector3>();
-        Vector3? storedIntersection = null;
-
-        int count = face.vertices.Count;
-        for (int i = 0; i < count; i++)
-        {
-            int next = (i + 1) % count;
-            float dCurrent = distances[i];
-            float dNext = distances[next];
-
-            bool currInside = (dCurrent <= epsilon);
-            bool nextInside = (dNext <= epsilon);
-
-            // If current is inside, keep it
-            if (currInside)
-            {
-                newVerts.Add(face.vertices[i]);
-            }
-
-            // If there's an intersection crossing from inside->outside or outside->inside:
-            if (currInside != nextInside)
-            {
-                intersectionCount++;
-
-                float total = (dCurrent - dNext);
-                if (Mathf.Abs(total) < 1e-12f)
-                {
-                    // degenerate => skip or handle
-                    continue;
-                }
-                float t = dCurrent / (dCurrent - dNext);
-                Vector3 interPt = Vector3.Lerp(
-                    face.vertices[i],
-                    face.vertices[next],
-                    t
-                );
-                newVerts.Add(interPt);
-
-                if (storedIntersection == null)
-                {
-                    // store
-                    storedIntersection = interPt;
-                }
-                else
-                {
-                    // we have a stored intersection => create Edge
-                    outEdges.Add(new Edge3D(storedIntersection.Value, interPt));
-                    storedIntersection = null;
-                }
-            }
-        }
-
-        // 3) Strict rule: If intersectionCount != 2 => discard face 
-        //    (We want exactly 2 crossing points for a "proper" clip).
-        //    If intersectionCount==0 we should have caught that above (fully in or out).
-        if (intersectionCount == 2 || intersectionCount == 4 || intersectionCount == 6)
-        {
-            // 4) Return the newly clipped polygon
-            return new Polygon3D(newVerts);
-        }
-        else
-        {
-            return new Polygon3D(); // empty => discard
-        }
-    }
-
-    private Polygon3D ClipPolygonExtended(
-    Polygon3D face,
-    Vector3 planeNormal,
-    float planeDistance,
-    float epsilon,
-    out List<Edge3D> outEdges
-)
+    private Polygon3D ClipPolygonExtended(Polygon3D face, Vector3 planeNormal, float planeDistance, float epsilon, out List<Edge3D> outEdges)
     {
         outEdges = new List<Edge3D>();
 
@@ -771,37 +545,6 @@ public class VoronoiTest3D : MonoBehaviour
             or something similar.
             This is geometry code: tricky but not huge. 
         */
-    }
-
-    /// <summary>
-    /// Clips a polyhedron against a single plane and collects the intersection edges
-    /// so that we can form a new capping polygon to fill holes left in fragments.
-    /// </summary>
-    /// <param name="polyhedron">Input shape</param>
-    /// <param name="plane_normal">Plane normal</param>
-    /// <param name="plane_distance">Plane distance in the equation n·x + d=0</param>
-    /// <param name="intersection_edges">Output: a list of edges formed by the intersection of each face with the plane.</param>
-    /// <returns>The clipped polyhedron (inside the plane)</returns>
-    private Polyhedron ClipPolyhedronAgainstPlane(Polyhedron polyhedron, Vector3 plane_normal, float plane_distance, out List<Edge3D> intersection_edges)
-    {
-        intersection_edges = new List<Edge3D>();
-        Polyhedron clipped_polyhedron = new Polyhedron();
-        foreach (Polygon3D face in polyhedron.faces)
-        {
-            //clip face and collect edges from face's intersection
-            List<Edge3D> face_edges;
-            Polygon3D clipped = ClipPolygonAgainstPlane(face, plane_normal, plane_distance, out face_edges);
-
-            //merge these edges with global intersection edges
-            intersection_edges.AddRange(face_edges);
-
-            //if clipped polygon has >=3 vertices it is a valid face
-            if (clipped.vertices.Count >= 3)
-            {
-                clipped_polyhedron.faces.Add(clipped);
-            }
-        }
-        return clipped_polyhedron;
     }
 
     private Polyhedron StrictClipPolyhedronAgainstPlane(Polyhedron polyhedron, Vector3 planeNormal, float planeDistance, float epsilon, out List<Edge3D> intersectionEdges)
@@ -984,34 +727,6 @@ public class VoronoiTest3D : MonoBehaviour
         return clipped_mesh;
     }
 
-    private Polyhedron ClipPolyhedronAgainstPlaneWithCaps(Polyhedron polyhedron, Vector3 plane_normal, float plane_distance)
-    {
-        // 1) Clip
-        List<Edge3D> intersection_edges;
-        //Polyhedron clipped = ClipPolyhedronAgainstPlane(polyhedron, plane_normal, plane_distance, out intersection_edges);
-        Polyhedron clipped = StrictClipPolyhedronAgainstPlane(polyhedron, plane_normal, plane_distance, fracture_epsilon, out intersection_edges);
-
-        // 2) Build loops from intersectionEdges
-        List<List<Vector3>> loops = CappingUtilities.BuildRobustCapLoops(intersection_edges, 1e-4f); //1e-5f, 1e-6f, 1e-4f
-
-        // 3) For each loop, create a cap face
-        foreach (var loop in loops)
-        {
-            if (loop.Count < 3)
-                continue; // skip degenerate
-
-            Polygon3D cap_face = new Polygon3D(loop);
-
-            // Optionally ensure orientation (dot w/ planeNormal) is correct
-            // If needed: compute face normal & reverse if negative
-
-            clipped.faces.Add(cap_face);
-        }
-
-        return clipped;
-    }
-
-
     private void OnDrawGizmos()
     {
         //set Gizmos matrix to the cube's transform, so all gizmos drawn are relative to the cube in world space
@@ -1099,15 +814,5 @@ public class VoronoiTest3D : MonoBehaviour
         // i.e., face.vertices[i] -> projected2D[i].
 
         return localTriIndices2D;
-    }
-
-    private bool IsMeshTooSmall(Mesh m, float minSize)
-    {
-        Bounds b = m.bounds;
-        if (b.size.x < minSize && b.size.y < minSize && b.size.z < minSize)
-        {
-            return true;
-        }
-        return false;
     }
 }
