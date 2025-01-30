@@ -36,7 +36,7 @@ public class ShapeMatchingTest : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         if (rb == null)
         {
-            Debug.LogError("No Rigidbody found on this GameObject! Adding one.");
+            Debug.LogWarning("No Rigidbody found on this GameObject! Adding one.");
             rb = gameObject.AddComponent<Rigidbody>();
         }
 
