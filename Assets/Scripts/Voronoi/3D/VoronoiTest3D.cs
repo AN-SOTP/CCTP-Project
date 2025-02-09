@@ -29,8 +29,6 @@ public class VoronoiTest3D : MonoBehaviour
 
     public float fracture_epsilon = 1e-4f;
 
-    private Polyhedron main_polyhedron;
-
 
     [System.Serializable]
     public struct plane_data
@@ -87,9 +85,6 @@ public class VoronoiTest3D : MonoBehaviour
 
         object_planes = GetPlanesFromMesh(object_mesh);
         Debug.Log("Extracted " + object_planes.Count + " planes from object mesh.");
-
-        main_polyhedron = MeshToPolyhedron(object_mesh);
-        Debug.Log($"mainPolyhedron => faces={main_polyhedron.faces.Count}");
 
         //generate sites!
         GenerateVoronoiSites();
@@ -368,29 +363,6 @@ public class VoronoiTest3D : MonoBehaviour
             {
                 normal = normal,
                 distance = distance
-            });
-        }
-        return planes;
-    }
-
-    private List<plane_data> GetPlanesFromPolyhedron(Polyhedron poly)
-    {
-        List<plane_data> planes = new List<plane_data>();
-
-        foreach (var face in poly.faces)
-        {
-            Vector3 face_normal = PolyhedronCleanup.ComputeFaceNormal(face);
-            if (face_normal == Vector3.zero)
-            {
-                continue;
-            }
-
-            float plane_distance = Vector3.Dot(face_normal, face.vertices[0]);
-
-            planes.Add(new plane_data
-            {
-                normal = face_normal,
-                distance = plane_distance
             });
         }
         return planes;
@@ -783,24 +755,6 @@ public class VoronoiTest3D : MonoBehaviour
         // i.e., face.vertices[i] -> projected2D[i].
 
         return localTriIndices2D;
-    }
-
-    public Polyhedron IntersectPolyhedra(Polyhedron polyA, Polyhedron polyB, float epsilon)
-    {
-        Polyhedron result = polyA.Clone();
-        List<plane_data> planesB = GetPlanesFromPolyhedron(polyB);
-
-        for (int i = 0; i < planesB.Count; i++)
-        {
-            plane_data p = planesB[i];
-            List<Edge3D> ignored;
-            result = StrictClipPolyhedronAgainstPlane(result, p.normal, p.distance, epsilon, out ignored);
-            if (result.faces.Count == 0)
-            {
-                break;
-            }
-        }
-        return result;
     }
 
     private void OnDrawGizmos()
