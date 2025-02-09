@@ -111,10 +111,9 @@ public class VoronoiTest3D : MonoBehaviour
             {
                 if (hit.transform == transform)
                 {
-                    //BuildAllVoronoiCells();
-                    //Fracture(hit.point);
-                    FractureOneCell(hit.point);
-                    //fractured = true;
+                    BuildAllVoronoiCells();
+                    Fracture(hit.point);
+                    fractured = true;
                 }
             }
         }
@@ -337,131 +336,6 @@ public class VoronoiTest3D : MonoBehaviour
                 rigidbody.AddExplosionForce(explosion_force, hit_point, explosion_radius, upwards_modifier, ForceMode.Impulse);
             }
         }
-    }
-
-    void FractureOneCell(Vector3 hit_point)
-    {
-        Vector3 nearest_site = FindNearestSite(hit_point);
-        voronoi_sites.Remove(nearest_site);  // remove from the list so it can't be reused
-
-        Polyhedron cell_poly = BuildSingleVoronoiCellPolyhedron(nearest_site);
-        Polyhedron chunk = ClipPolyhedronAgainstObjectPlanes(cell_poly, object_planes);
-
-        if (chunk.faces.Count > 0)
-        {
-            ForceOutwardNormals(chunk);
-
-            Mesh chunk_mesh = BuildMeshFromPolyhedron(chunk);
-            CreateFragmentGameObject(chunk_mesh);
-
-            //subtract from main object
-            main_polyhedron = SubtractPolyhedron(main_polyhedron, chunk, fracture_epsilon);
-
-            //rebuild the main mesh
-            Mesh new_main_mesh = BuildMeshFromPolyhedron(main_polyhedron);
-            GetComponent<MeshFilter>().mesh = new_main_mesh;
-            var coll = GetComponent<MeshCollider>();
-            if (coll != null)
-            {
-                coll.sharedMesh = new_main_mesh;
-            }
-        }
-        else
-        {
-            Debug.LogWarning("No chunk, the site might be outside or doesn't intersect the main object!");
-        }
-        // no geometry subtraction so the main object is unchanged visually
-    }
-
-    private void ForceOutwardNormals(Polyhedron poly)
-    {
-        Vector3 poly_center = ComputePolyhedronCentroid(poly);
-
-        //for each face, see if face normal points outward or inward
-        foreach (var face in poly.faces)
-        {
-            Vector3 n = PolyhedronCleanup.ComputeFaceNormal(face);
-            if (n == Vector3.zero) continue;
-
-            Vector3 face_center = Vector3.zero;
-            foreach (var v in face.vertices) face_center += v;
-            face_center /= face.vertices.Count;
-
-            Vector3 outward_dir = (face_center - poly_center);
-            if (Vector3.Dot(n, outward_dir) < 0f)
-            {
-                //normal is inward, flip
-                face.vertices.Reverse();
-                //now the normal is reversed
-            }
-        }
-    }
-    private Vector3 ComputePolyhedronCentroid(Polyhedron poly)
-    {
-        // average of all face vertices
-        Vector3 sum = Vector3.zero;
-        int count = 0;
-        foreach (var face in poly.faces)
-        {
-            foreach (var v in face.vertices)
-            {
-                sum += v;
-                count++;
-            }
-        }
-        if (count == 0) return Vector3.zero;
-        return sum / count;
-    }
-
-    private Vector3 FindNearestSite(Vector3 worldHit)
-    {
-        //simplest approach: transform the hit to local space if needed
-        //or just do everything in object local space from the start. then pick site with min dist
-        float best_dist = float.MaxValue;
-        Vector3 best_site = Vector3.zero;
-
-        foreach (var s in voronoi_sites)
-        {
-            float d = Vector3.Distance(s, worldHit);
-            if (d < best_dist)
-            {
-                best_dist = d;
-                best_site = s;
-            }
-        }
-        return best_site;
-    }
-
-    private Polyhedron BuildSingleVoronoiCellPolyhedron(Vector3 site_pos)
-    {
-        if (!site_to_vertex_map.ContainsKey(site_pos))
-        {
-            Debug.LogWarning("Site not found, no cell");
-            return new Polyhedron();
-        }
-
-        VoronoiVertex site_vertex = site_to_vertex_map[site_pos];
-
-        //gather the cells in voronoi_mesh that contain that site
-        var cells_with_site = voronoi_mesh.Vertices
-            .Where(v => v.Vertices.Contains(site_vertex))
-            .ToList();
-
-        //gather their circumcenters => build a hull => convert to polyhedron
-        List<Vector3> circumcenters = new List<Vector3>();
-        foreach (var c in cells_with_site)
-        {
-            c.ComputeCircumcenter();
-            circumcenters.Add(c.Circumcenter);
-        }
-
-        //create a hull mesh from the circumcenters
-        Mesh hull_mesh = CreateMeshFromCircumcenters(circumcenters);
-        //convert to polyhedron
-        Polyhedron fragment_polyhedron = MeshToPolyhedron(hull_mesh);
-
-        //that is your single cell polyhedron
-        return fragment_polyhedron;
     }
 
     bool IsPointInsideBounds(Vector3 point, Bounds bounds)
@@ -909,29 +783,6 @@ public class VoronoiTest3D : MonoBehaviour
         // i.e., face.vertices[i] -> projected2D[i].
 
         return localTriIndices2D;
-    }
-
-    private Polyhedron SubtractPolyhedron(Polyhedron main_poly, Polyhedron chunk, float epsilon)
-    {
-        //extract planes from chunk
-        List<plane_data> planes = GetPlanesFromPolyhedron(chunk);
-
-        //successively clip mainPoly so we keep the “outside” for each plane
-        Polyhedron result = main_poly;
-
-        foreach (var p in planes)
-        {
-            Vector3 flipped_normal = -p.normal;
-            float flipped_dist = -p.distance;
-
-            List<Edge3D> ignored_edges;
-            result = StrictClipPolyhedronAgainstPlane(result, flipped_normal, flipped_dist, epsilon, out ignored_edges);
-
-            // optional capping code if you want to “seal” the hole
-            // typically we skip it because we’re removing geometry, so no capping needed
-        }
-
-        return result;
     }
 
     public Polyhedron IntersectPolyhedra(Polyhedron polyA, Polyhedron polyB, float epsilon)
