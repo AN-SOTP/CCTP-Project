@@ -29,6 +29,9 @@ public class VoronoiTest3D : MonoBehaviour
 
     public float fracture_epsilon = 1e-4f;
 
+    private DelaunayTriangulation<TetraVertex, TetraCell> tetra_mesh;
+    //make list of exisitng chunk game objects
+    List<GameObject> chunk_objects = new List<GameObject>();
 
     [System.Serializable]
     public struct plane_data
@@ -71,6 +74,70 @@ public class VoronoiTest3D : MonoBehaviour
             return;
         }
 
+        VolumetricTetraBuilder builder = new VolumetricTetraBuilder();
+
+        //build a tetrahedral volume with, say, 300 sampled interior points
+        tetra_mesh = builder.BuildTetraMesh(object_mesh, 300);
+        if (tetra_mesh == null)
+        {
+            Debug.LogWarning("Failed to build tetra mesh!");
+        }
+        else
+        {
+            Dictionary<TetraCell, List<TetraCell>> adjacency = TetraAdjacency.BuildAdjacencyGraph(tetra_mesh);
+            //cluster into lumps of up to (max_size) tetrahedra, 50-200/300?
+            //List<List<TetraCell>> lumps = TetraAdjacency.ClusterTetrahedra(adjacency, 100);
+            //List<Vector3> seeds = VoronoiTetraPartitioner.SampleSeedsInsideMesh(object_mesh, 30);
+            //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.Partition(tetra_mesh, seeds);
+
+            //for adaptive function: umps bigger than 5 units dimension get more seeds (maxDim),  lumps with >200 tetra get more seeds (maxTetraCount)
+            //List<List<TetraCell>> lumps = AdaptiveVoronoiPartitioner.AdaptivePartition(tetraMesh: tetra_mesh, sourceMesh: object_mesh, initialSeedCount: 10, maxDim: 5f,
+            //maxTetraCount: 200, maxIterations: 10, maxTotalSeeds: 200);
+
+            List<List<TetraCell>> lumps = new List<List<TetraCell>>();
+
+            // e.g. 5 passes, each pass seeds= (some fraction of bounding box or desired lumps)
+            // lumps bigger than fractionOfSizeAllowed * boundingBoxDim remain leftover for next pass
+            ProgressiveVoronoiCarver.ProgressiveCarve(
+                tetra_mesh,
+                object_mesh,
+                ref lumps,
+                fractionOfSizeAllowed: 0.1f,
+                passCount: 8,
+                seedsPerPass: 15
+            );
+
+
+            int lump_index = 0;
+            foreach (var lump in lumps)
+            {
+                //build a mesh, game object etc. for this chunk
+                //Mesh chunk_mesh = VolumetricTetraBuilder.BuildMeshForLump(lump);
+                Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForLump(lump);
+
+                GameObject chunk_object = new GameObject("TetraLump_" + lump_index);
+                chunk_object.transform.SetParent(this.transform, false);
+
+                MeshFilter mf = chunk_object.AddComponent<MeshFilter>();
+                mf.sharedMesh = chunk_mesh;
+
+                MeshRenderer mr = chunk_object.AddComponent<MeshRenderer>();
+               // mr.material = new Material(Shader.Find("Standard"));
+                mr.material = this.GetComponent<MeshRenderer>().sharedMaterial;
+                //mr.material.color = Color.Lerp(Color.red, Color.yellow, UnityEngine.Random.value);
+
+                MeshCollider mc = chunk_object.AddComponent<MeshCollider>();
+                mc.sharedMesh = chunk_mesh;
+                mc.convex = true;
+
+                Rigidbody rb = chunk_object.AddComponent<Rigidbody>();
+                rb.isKinematic = true;
+
+                chunk_objects.Add(chunk_object);
+                lump_index++;
+            }
+        }
+
         MeshCollider mesh_collider = GetComponent<MeshCollider>();
         if (mesh_collider == null)
         {
@@ -106,8 +173,9 @@ public class VoronoiTest3D : MonoBehaviour
             {
                 if (hit.transform == transform)
                 {
-                    BuildAllVoronoiCells();
-                    Fracture(hit.point);
+                    //BuildAllVoronoiCells();
+                    //Fracture(hit.point);
+                    FractureVolumetric(hit.point);
                     fractured = true;
                 }
             }
@@ -325,6 +393,27 @@ public class VoronoiTest3D : MonoBehaviour
         foreach (Transform fragment in transform)
         {
             Rigidbody rigidbody = fragment.GetComponent<Rigidbody>();
+            if (rigidbody != null)
+            {
+                rigidbody.isKinematic = false;
+                rigidbody.AddExplosionForce(explosion_force, hit_point, explosion_radius, upwards_modifier, ForceMode.Impulse);
+            }
+        }
+    }
+
+    void FractureVolumetric(Vector3 hit_point)
+    {
+        if (GetComponent<Renderer>() != null) GetComponent<Renderer>().enabled = false;
+        if (GetComponent<Collider>() != null) GetComponent<Collider>().enabled = false;
+
+        //params for force when hit
+        float explosion_force = 5.0f;
+        float explosion_radius = 3.0f;
+        float upwards_modifier = 0.1f;
+
+        foreach (GameObject chunk in chunk_objects)
+        {
+            Rigidbody rigidbody = chunk.GetComponent<Rigidbody>();
             if (rigidbody != null)
             {
                 rigidbody.isKinematic = false;
