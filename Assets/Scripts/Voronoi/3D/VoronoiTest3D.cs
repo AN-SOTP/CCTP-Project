@@ -387,7 +387,6 @@ public class VoronoiTest3D : MonoBehaviour
 
     void Fracture(Vector3 hit_point)
     {
-        // Disable the original cube's renderer and collider
         if (GetComponent<Renderer>() != null) GetComponent<Renderer>().enabled = false;
         if (GetComponent<Collider>() != null) GetComponent<Collider>().enabled = false;
 
@@ -585,24 +584,11 @@ public class VoronoiTest3D : MonoBehaviour
         }
         else if (intersection_count == 4)
         {
-            // multiple chords scenario => we have 4 intersection points => 2 chords
-            // We'll pair them up in the order found. 
-            // But be careful to ensure they form distinct pairs. 
-            // For simplicity, assume the first 2 are chord 1, next 2 are chord 2.
-
-            // Build them into out_edges
             if (intersection_points.Count == 4)
             {
                 out_edges.Add(new Edge3D(intersection_points[0].point, intersection_points[1].point));
                 out_edges.Add(new Edge3D(intersection_points[2].point, intersection_points[3].point));
             }
-
-            // Next: split the polygon into two polygons, because with 2 chords,
-            // the plane is effectively slicing the face in two places => 2 sub-polygons.
-
-            // For simplicity, let's do a naive approach: 
-            // we know newVerts includes all inside geometry plus we have 4 intersection points. 
-            // But the order of intersection points in newVerts can help us do a "cut" from chord1 to chord2.
 
             return SplitFaceByTwoChords(new_verts, intersection_points, epsilon);
         }
@@ -617,30 +603,8 @@ public class VoronoiTest3D : MonoBehaviour
 
     private Polygon3D SplitFaceByTwoChords(List<Vector3> newVerts, List<(int idx, Vector3 pt)> intersectionPoints, float epsilon)
     {
-        // *** For brevity, let's do a simpler approach: 
-        // We'll just keep them as 1 polygon, ignoring the real geometry of 2 sub-polygons. 
-        // This can cause "some" geometry being incorrect if it's truly a multi-chord slice. 
-        // But it’s simpler than building 2 sub-polygons. 
-        // 
-        // If you want to actually subdivide into 2 polygons, you need a method that 
-        // re-walks newVerts, cutting at chord boundaries, and forms 2 new polygons.
-
-        // We'll build a single polygon for demonstration
-        // but store 2 chords as outEdges in the code above.
-
-        // If you want to keep the single polygon approach, just return "newVerts" as is:
+       //need to implement proper two chord approach (no longer needed currently)
         return new Polygon3D(newVerts);
-
-        /* 
-           If you need a real 2-sub-polygon solution:
-            1) Identify the indices of chord1 intersection points => i1, i2
-            2) Identify the indices of chord2 intersection points => i3, i4
-            3) newVerts is in order => walk from i1 to i2 => i3 => i4 => etc
-            4) Build polygon #1 => i1..i2 plus i3..i4
-            5) Build polygon #2 => i2..i3 plus i4..i1
-            or something similar.
-            This is geometry code: tricky but not huge. 
-        */
     }
 
     private Polyhedron StrictClipPolyhedronAgainstPlane(Polyhedron polyhedron, Vector3 plane_normal, float plane_distance, float epsilon, out List<Edge3D> intersection_edges)
