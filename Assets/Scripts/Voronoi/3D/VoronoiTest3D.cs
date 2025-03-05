@@ -58,6 +58,8 @@ public class VoronoiTest3D : MonoBehaviour
         }
     }
 
+    public List<TetraUnionBuilder.TriFace> debug_faces; //for debug
+
     void Start()
     {
         MeshFilter mesh_filter = GetComponent<MeshFilter>();
@@ -76,8 +78,8 @@ public class VoronoiTest3D : MonoBehaviour
 
         VolumetricTetraBuilder builder = new VolumetricTetraBuilder();
 
-        //build a tetrahedral volume with, say, 300 sampled interior points
-        tetra_mesh = builder.BuildTetraMesh(object_mesh, 300);
+        //build a tetrahedral volume with 1000 sampled interior points
+        tetra_mesh = builder.BuildTetraMesh(object_mesh, 1000);
         if (tetra_mesh == null)
         {
             Debug.LogWarning("Failed to build tetra mesh!");
@@ -94,26 +96,32 @@ public class VoronoiTest3D : MonoBehaviour
             //List<List<TetraCell>> lumps = AdaptiveVoronoiPartitioner.AdaptivePartition(tetraMesh: tetra_mesh, sourceMesh: object_mesh, initialSeedCount: 10, maxDim: 5f,
             //maxTetraCount: 200, maxIterations: 10, maxTotalSeeds: 200);
 
-            List<List<TetraCell>> lumps = new List<List<TetraCell>>();
+            //List<List<TetraCell>> lumps = new List<List<TetraCell>>();
 
-            // e.g. 5 passes, each pass seeds= (some fraction of bounding box or desired lumps)
-            // lumps bigger than fractionOfSizeAllowed * boundingBoxDim remain leftover for next pass
-            ProgressiveVoronoiCarver.ProgressiveCarve(
+            //lumps bigger than fractionOfSizeAllowed * boundingBoxDim remain leftover for next pass
+            /*ProgressiveVoronoiCarver.ProgressiveCarve(
                 tetra_mesh,
                 object_mesh,
                 ref lumps,
                 fractionOfSizeAllowed: 0.1f,
                 passCount: 8,
                 seedsPerPass: 15
-            );
+            );*/
 
+            //THIS is done in VoronoiTetraPartitioner.PartitionCarveOutAdaptive
+            //List<Vector3> seeds = VoronoiTetraPartitioner.SampleWeightedSeedsInsideMesh( object_mesh, 20, 0.2F);
 
+            //lumps can't reuse tetra, so no internal overlap
+            //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOut(tetra_mesh, seed_groups, object_mesh, 0.1f);
+
+            List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOutAdaptive(tetra_mesh, object_mesh, 25, 0.05f, 10); 
             int lump_index = 0;
             foreach (var lump in lumps)
             {
                 //build a mesh, game object etc. for this chunk
                 //Mesh chunk_mesh = VolumetricTetraBuilder.BuildMeshForLump(lump);
                 Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForLump(lump);
+                //Mesh chunk_mesh = TetraUnionBuilder.BuildUnionFromTetra(lump);
 
                 GameObject chunk_object = new GameObject("TetraLump_" + lump_index);
                 chunk_object.transform.SetParent(this.transform, false);
@@ -136,6 +144,7 @@ public class VoronoiTest3D : MonoBehaviour
                 chunk_objects.Add(chunk_object);
                 lump_index++;
             }
+            
         }
 
         MeshCollider mesh_collider = GetComponent<MeshCollider>();
@@ -888,6 +897,19 @@ public class VoronoiTest3D : MonoBehaviour
                 Gizmos.DrawSphere(cell.Circumcenter, 0.01f);
             }
         }
+
+        /*
+        Gizmos.color = Color.magenta;
+        if (debug_faces != null)
+        {
+            foreach (var face in debug_faces)
+            {
+                //draw line for each face edge
+                Gizmos.DrawLine(face.v0, face.v1);
+                Gizmos.DrawLine(face.v1, face.v2);
+                Gizmos.DrawLine(face.v2, face.v0);
+            }
+        }*/
 
         //resets the matrix set at the start of function to not affect other gizmos drawn in the scene (for example 2d test square currently in scene).
         Gizmos.matrix = Matrix4x4.identity;

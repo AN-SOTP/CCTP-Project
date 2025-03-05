@@ -5,43 +5,37 @@ using System.Linq;
 
 public static class ProgressiveVoronoiCarver
 {
-    public static void ProgressiveCarve(
-        DelaunayTriangulation<TetraVertex, TetraCell> tetraMesh,
-        Mesh sourceMesh,
-        ref List<List<TetraCell>> lumps,
-        float fractionOfSizeAllowed,
-        int passCount,
-        int seedsPerPass
-    )
+    public static void ProgressiveCarve(DelaunayTriangulation<TetraVertex, TetraCell> tetra_mesh, Mesh source_mesh, ref List<List<TetraCell>> lumps, float fraction_of_size_allowed, int pass_count, int seeds_per_pass)
     {
-        HashSet<TetraCell> unassigned = new HashSet<TetraCell>(tetraMesh.Cells);
+        HashSet<TetraCell> unassigned = new HashSet<TetraCell>(tetra_mesh.Cells);
 
-        // bounding box dimension
-        Vector3 bSize = sourceMesh.bounds.size;
-        float objDim = Mathf.Max(bSize.x, bSize.y, bSize.z);
-        float maxAllowableDim = fractionOfSizeAllowed * objDim;
+        //bounding box dimension
+        Vector3 b_size = source_mesh.bounds.size;
+        float obj_dim = Mathf.Max(b_size.x, b_size.y, b_size.z);
+        float max_allowable_dim = fraction_of_size_allowed * obj_dim;
 
-        for (int pass = 0; pass < passCount; pass++)
+        for (int pass = 0; pass < pass_count; pass++)
         {
-            if (unassigned.Count == 0) break;
+            if (unassigned.Count == 0)
+            {
+                break;
+            }
 
-            // sample seeds
-            List<Vector3> seeds = VoronoiTetraPartitioner.SampleSeedsInsideMesh(sourceMesh, seedsPerPass);
+            List<Vector3> seeds = VoronoiTetraPartitioner.SampleSeedsInsideMesh(source_mesh, seeds_per_pass);
 
-            // partition unassigned by nearest seed
-            List<List<TetraCell>> passLumps = VoronoiPartitionUnassigned(unassigned, seeds);
+            List<List<TetraCell>> pass_lumps = VoronoiPartitionUnassigned(unassigned, seeds);
 
-            // lumps that are below dimension limit => finalize them
-            foreach (var lump in passLumps)
+            // finalize lumps below dimension limit
+            foreach (var lump in pass_lumps)
             {
                 if (lump.Count == 0) continue;
 
-                Vector3 minPos, maxPos;
-                GetLumpMinMax(lump, out minPos, out maxPos);
-                Vector3 size = maxPos - minPos;
-                float largestDim = Mathf.Max(size.x, size.y, size.z);
+                Vector3 min_pos, max_pos;
+                GetLumpMinMax(lump, out min_pos, out max_pos);
+                Vector3 size = max_pos - min_pos;
+                float largest_dim = Mathf.Max(size.x, size.y, size.z);
 
-                if (largestDim < maxAllowableDim)
+                if (largest_dim < max_allowable_dim)
                 {
                     lumps.Add(lump);
                     foreach (var c in lump)
@@ -51,25 +45,22 @@ public static class ProgressiveVoronoiCarver
                 }
                 else
                 {
-                    // remain in leftover => next pass seeds might subdivide them further
+                    
                 }
             }
         }
 
-        // final pass: anything leftover is forcibly lumps
+        // final pass, anything leftover is forcibly lumped
         if (unassigned.Count > 0)
         {
-            // optional final seeds
-            List<Vector3> finalSeeds = VoronoiTetraPartitioner.SampleSeedsInsideMesh(sourceMesh, seedsPerPass);
-            List<List<TetraCell>> leftoverLumps = VoronoiPartitionUnassigned(unassigned, finalSeeds);
-            lumps.AddRange(leftoverLumps);
+            //optional final seeds
+            List<Vector3> final_seeds = VoronoiTetraPartitioner.SampleSeedsInsideMesh(source_mesh, seeds_per_pass);
+            List<List<TetraCell>> leftover_lumps = VoronoiPartitionUnassigned(unassigned, final_seeds);
+            lumps.AddRange(leftover_lumps);
         }
     }
 
-    private static List<List<TetraCell>> VoronoiPartitionUnassigned(
-        HashSet<TetraCell> unassigned,
-        List<Vector3> seeds
-    )
+    private static List<List<TetraCell>> VoronoiPartitionUnassigned(HashSet<TetraCell> unassigned, List<Vector3> seeds)
     {
         List<List<TetraCell>> lumps = new List<List<TetraCell>>(seeds.Count);
         for (int i = 0; i < seeds.Count; i++)
@@ -81,18 +72,18 @@ public static class ProgressiveVoronoiCarver
         {
             Vector3 c = ComputeCentroid(cell);
 
-            int bestSeed = -1;
-            float bestDist = float.MaxValue;
+            int best_seed = -1;
+            float best_dist = float.MaxValue;
             for (int i = 0; i < seeds.Count; i++)
             {
                 float d = (c - seeds[i]).sqrMagnitude;
-                if (d < bestDist)
+                if (d < best_dist)
                 {
-                    bestDist = d;
-                    bestSeed = i;
+                    best_dist = d;
+                    best_seed = i;
                 }
             }
-            lumps[bestSeed].Add(cell);
+            lumps[best_seed].Add(cell);
         }
 
         lumps.RemoveAll(x => x.Count == 0);
@@ -112,32 +103,28 @@ public static class ProgressiveVoronoiCarver
         return sum / verts.Length;
     }
 
-    private static void GetLumpMinMax(List<TetraCell> lump, out Vector3 minPos, out Vector3 maxPos)
+    private static void GetLumpMinMax(List<TetraCell> lump, out Vector3 min_pos, out Vector3 max_pos)
     {
-        minPos = Vector3.positiveInfinity;
-        maxPos = Vector3.negativeInfinity;
+        min_pos = Vector3.positiveInfinity;
+        max_pos = Vector3.negativeInfinity;
         for (int i = 0; i < lump.Count; i++)
         {
             TetraVertex[] tv = lump[i].Vertices;
             for (int j = 0; j < tv.Length; j++)
             {
-                Vector3 p = new Vector3(
-                    (float)tv[j].Position[0],
-                    (float)tv[j].Position[1],
-                    (float)tv[j].Position[2]
-                );
-                if (p.x < minPos.x) minPos.x = p.x;
-                if (p.y < minPos.y) minPos.y = p.y;
-                if (p.z < minPos.z) minPos.z = p.z;
-                if (p.x > maxPos.x) maxPos.x = p.x;
-                if (p.y > maxPos.y) maxPos.y = p.y;
-                if (p.z > maxPos.z) maxPos.z = p.z;
+                Vector3 p = new Vector3((float)tv[j].Position[0], (float)tv[j].Position[1], (float)tv[j].Position[2]);
+                if (p.x < min_pos.x) min_pos.x = p.x;
+                if (p.y < min_pos.y) min_pos.y = p.y;
+                if (p.z < min_pos.z) min_pos.z = p.z;
+                if (p.x > max_pos.x) max_pos.x = p.x;
+                if (p.y > max_pos.y) max_pos.y = p.y;
+                if (p.z > max_pos.z) max_pos.z = p.z;
             }
         }
         if (lump.Count == 0)
         {
-            minPos = Vector3.zero;
-            maxPos = Vector3.zero;
+            min_pos = Vector3.zero;
+            max_pos = Vector3.zero;
         }
     }
 }

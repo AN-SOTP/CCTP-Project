@@ -42,8 +42,12 @@ public static class ConvexHullChunkBuilder
             return null;
         }
 
-        //convert the hull faces to a Unity mesh
-        return CreateMeshFromHull(hull_result.Result);
+        //convert the hull faces to a mesh
+        //return CreateMeshFromHull(hull_result.Result);
+        Mesh chunk_mesh = CreateMeshFromHull(hull_result.Result);
+        InwardOffsetMesh(chunk_mesh, 0.95f);
+
+        return chunk_mesh;
     }
 
     private static Mesh CreateMeshFromHull(ConvexHull<DefaultVertex, DefaultConvexFace<DefaultVertex>> hull)
@@ -92,6 +96,33 @@ public static class ConvexHullChunkBuilder
         mesh.RecalculateBounds();
 
         return mesh;
+    }
+
+    private static void InwardOffsetMesh(Mesh mesh, float scaleFactor)
+    {
+        Vector3[] verts = mesh.vertices;
+        if (verts.Length == 0)
+        {
+            return;
+        }
+
+        Vector3 centroid = Vector3.zero;
+        for (int i = 0; i < verts.Length; i++)
+        {
+            centroid += verts[i];
+        }
+        centroid /= verts.Length;
+
+        // offset each vertex
+        for (int i = 0; i < verts.Length; i++)
+        {
+            Vector3 offset = verts[i] - centroid;
+            verts[i] = centroid + offset * scaleFactor;
+        }
+
+        mesh.vertices = verts;
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
     }
 
     private static Vector3 ToV3(TetraVertex tv)
