@@ -58,8 +58,6 @@ public class VoronoiTest3D : MonoBehaviour
         }
     }
 
-    public List<TetraUnionBuilder.TriFace> debug_faces; //for debug
-
     void Start()
     {
         MeshFilter mesh_filter = GetComponent<MeshFilter>();
@@ -897,21 +895,6 @@ public class VoronoiTest3D : MonoBehaviour
                 Gizmos.DrawSphere(cell.Circumcenter, 0.01f);
             }
         }
-
-        /*
-        Gizmos.color = Color.magenta;
-        if (debug_faces != null)
-        {
-            foreach (var face in debug_faces)
-            {
-                //draw line for each face edge
-                Gizmos.DrawLine(face.v0, face.v1);
-                Gizmos.DrawLine(face.v1, face.v2);
-                Gizmos.DrawLine(face.v2, face.v0);
-            }
-        }*/
-
-        //resets the matrix set at the start of function to not affect other gizmos drawn in the scene (for example 2d test square currently in scene).
         Gizmos.matrix = Matrix4x4.identity;
     }
 }
