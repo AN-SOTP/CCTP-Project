@@ -85,31 +85,6 @@ public class VoronoiTest3D : MonoBehaviour
         else
         {
             Dictionary<TetraCell, List<TetraCell>> adjacency = TetraAdjacency.BuildAdjacencyGraph(tetra_mesh);
-            //cluster into lumps of up to (max_size) tetrahedra, 50-200/300?
-            //List<List<TetraCell>> lumps = TetraAdjacency.ClusterTetrahedra(adjacency, 100);
-            //List<Vector3> seeds = VoronoiTetraPartitioner.SampleSeedsInsideMesh(object_mesh, 30);
-            //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.Partition(tetra_mesh, seeds);
-
-            //for adaptive function: umps bigger than 5 units dimension get more seeds (maxDim),  lumps with >200 tetra get more seeds (maxTetraCount)
-            //List<List<TetraCell>> lumps = AdaptiveVoronoiPartitioner.AdaptivePartition(tetraMesh: tetra_mesh, sourceMesh: object_mesh, initialSeedCount: 10, maxDim: 5f,
-            //maxTetraCount: 200, maxIterations: 10, maxTotalSeeds: 200);
-
-            //List<List<TetraCell>> lumps = new List<List<TetraCell>>();
-
-            //lumps bigger than fractionOfSizeAllowed * boundingBoxDim remain leftover for next pass
-            /*ProgressiveVoronoiCarver.ProgressiveCarve(
-                tetra_mesh,
-                object_mesh,
-                ref lumps,
-                fractionOfSizeAllowed: 0.1f,
-                passCount: 8,
-                seedsPerPass: 15
-            );*/
-
-            //THIS is done in VoronoiTetraPartitioner.PartitionCarveOutAdaptive
-            //List<Vector3> seeds = VoronoiTetraPartitioner.SampleWeightedSeedsInsideMesh( object_mesh, 20, 0.2F);
-
-            //lumps can't reuse tetra, so no internal overlap
             //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOut(tetra_mesh, seed_groups, object_mesh, 0.1f);
 
             List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOutAdaptive(tetra_mesh, object_mesh, 25, 0.05f, 10); 
