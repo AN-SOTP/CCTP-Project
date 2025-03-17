@@ -1,10 +1,9 @@
-using System.Collections.Generic;
+ï»¿using System.Collections.Generic;
 using UnityEngine;
 using MIConvexHull;
 using System.Linq;
 
-// These two classes define the needed data structures for
-// MIConvexHull's DelaunayTriangulation in 3D.
+//tetra vertex and tetra cell are needed data structures for MIConvexHull's DelaunayTriangulation in 3D.
 public class TetraVertex : IVertex
 {
     public double[] Position { get; set; }
@@ -17,15 +16,14 @@ public class TetraVertex : IVertex
 
 public class TetraCell : TriangulationCell<TetraVertex, TetraCell>
 {
-    //inherits all necessary logic from TriangulationCell.
+    //inherits from TriangulationCell.
 }
 
 public class VolumetricTetraBuilder
 {
-    //method demonstrates how to:
-    //sample interior points of a mesh
-    //build a Delaunay triangulation of those points
-    //return the tetrahedral data structure
+    public static List<Vector3> debug_sample_points = new List<Vector3>();
+
+    //method demonstrates how to: sample interior points of a mesh, build a Delaunay triangulation of those points, return the tetrahedral data structure
     public DelaunayTriangulation<TetraVertex, TetraCell> BuildTetraMesh(Mesh source_mesh, int sample_count)
     {
         List<Vector3> inside_points = SampleInsidePoints(source_mesh, sample_count);
@@ -43,11 +41,14 @@ public class VolumetricTetraBuilder
             tetra_vertices.Add(new TetraVertex(p.x, p.y, p.z));
         }
 
+        float scale = Mathf.Max(source_mesh.bounds.size.x, source_mesh.bounds.size.y, source_mesh.bounds.size.z);
+        float tolerance = 1e-7f * scale;
+
         //create 3D Delaunay triangulation
         DelaunayTriangulation<TetraVertex, TetraCell> tetra_mesh = null;
         try
         {
-            tetra_mesh = DelaunayTriangulation<TetraVertex, TetraCell>.Create(tetra_vertices, 1e-7);
+            tetra_mesh = DelaunayTriangulation<TetraVertex, TetraCell>.Create(tetra_vertices, tolerance);
         }
         catch (System.Exception ex)
         {
@@ -82,10 +83,54 @@ public class VolumetricTetraBuilder
             if (IsPointInsideMesh(candidate, mesh))
             {
                 result.Add(candidate);
+                debug_sample_points.Add(candidate);
             }
         }
 
         return result;
+    }
+
+    //build off initial sampling with Lloyd Relaxation
+    private List<Vector3> SampleInsidePointsUniform(Mesh mesh, int count)
+    {
+        List<Vector3> points = SampleInsidePoints(mesh, count);
+        int iterations = 5;
+        for (int i = 0; i < iterations; i++)
+        {
+            points = LloydRelaxation(points, mesh.bounds);
+        }
+        return points;
+    }
+
+    //Lloyd relaxation, using fixed radius for neighbours
+    private List<Vector3> LloydRelaxation(List<Vector3> points, Bounds bounds)
+    {
+        List<Vector3> new_points = new List<Vector3>();
+        float radius_sq = 1f; // need to tune based on mesh scale
+        foreach (var p in points)
+        {
+            Vector3 sum = Vector3.zero;
+            int count = 0;
+            foreach (var q in points)
+            {
+                if ((p - q).sqrMagnitude < radius_sq)
+                {
+                    sum += q;
+                    count++;
+                }
+            }
+            if (count > 0)
+            {
+                Vector3 centroid = sum / count;
+                centroid = Vector3.Max(bounds.min, Vector3.Min(bounds.max, centroid));
+                new_points.Add(centroid);
+            }
+            else
+            {
+                new_points.Add(p);
+            }
+        }
+        return new_points;
     }
 
     //"point in mesh" test using a ray intersection count in local space
@@ -97,6 +142,9 @@ public class VolumetricTetraBuilder
 
         //cast along +X direction
         Vector3 ray_dir = Vector3.right * 10000f;
+
+        //optional small epsilon offset along ray direction
+        Vector3 ray_origin = point + ray_dir * 1e-4f;
 
         for (int i = 0; i < tris.Length; i += 3)
         {
@@ -113,7 +161,7 @@ public class VolumetricTetraBuilder
         return (hit_count % 2 == 1);
     }
 
-    //Möller–Trumbore intersection
+    //MÃ¶llerâ€“Trumbore intersection
     private bool RayTriangleIntersect(Vector3 ray_origin, Vector3 ray_dir, Vector3 v0, Vector3 v1, Vector3 v2)
     {
         Vector3 e1 = v1 - v0;

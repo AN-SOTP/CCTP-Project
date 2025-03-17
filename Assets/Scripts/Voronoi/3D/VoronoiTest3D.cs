@@ -8,6 +8,7 @@ using Sabresaurus.SabreCSG;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.UIElements;
+using static UnityEditor.MaterialProperty;
 using static VoronoiTest3D;
 
 //[ExecuteInEditMode]
@@ -32,6 +33,7 @@ public class VoronoiTest3D : MonoBehaviour
     private DelaunayTriangulation<TetraVertex, TetraCell> tetra_mesh;
     //make list of exisitng chunk game objects
     List<GameObject> chunk_objects = new List<GameObject>();
+    private DelaunayTriangulation<TetraVertex, TetraCell> current_tetra_mesh;
 
     [System.Serializable]
     public struct plane_data
@@ -76,25 +78,45 @@ public class VoronoiTest3D : MonoBehaviour
 
         VolumetricTetraBuilder builder = new VolumetricTetraBuilder();
 
-        //build a tetrahedral volume with 1000 sampled interior points
-        tetra_mesh = builder.BuildTetraMesh(object_mesh, 1000);
+        //build a tetrahedral volume
+        float volume = ComputeMeshVolume(object_mesh);
+        //float volume = ComputeMeshVolumeLocal(object_mesh);
+        int interior_count = Mathf.RoundToInt(volume * 50f);
+        tetra_mesh = builder.BuildTetraMesh(object_mesh, interior_count);
         if (tetra_mesh == null)
         {
             Debug.LogWarning("Failed to build tetra mesh!");
         }
         else
         {
-            Dictionary<TetraCell, List<TetraCell>> adjacency = TetraAdjacency.BuildAdjacencyGraph(tetra_mesh);
+            var all_cells = tetra_mesh.Cells.ToList();
+            //Dictionary<TetraCell, List<TetraCell>> adjacency = TetraAdjacency.BuildAdjacencyGraph(tetra_mesh);
             //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOut(tetra_mesh, seed_groups, object_mesh, 0.1f);
 
-            List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOutAdaptive(tetra_mesh, object_mesh, 25, 0.05f, 10); 
+            //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOutAdaptive(tetra_mesh, object_mesh, 25, 0.05f, 10); 
+            List<Vector3> seeds = new List<Vector3>();
+            Bounds b = object_mesh.bounds;
+            for (int i = 0; i < num_of_sites; i++)
+            {
+                float x = UnityEngine.Random.Range(b.min.x, b.max.x);
+                float y = UnityEngine.Random.Range(b.min.y, b.max.y);
+                float z = UnityEngine.Random.Range(b.min.z, b.max.z);
+                seeds.Add(new Vector3(x, y, z));
+            }
+            var lumps = TetraPartitioner.Partition(tetra_mesh, seeds);
+
+            // optional extra bounding box cull
+            Bounds mesh_bounds = object_mesh.bounds;
+
+            //var lumps = TetraLumpPartitioner.PartitionTetraMesh(tetra_mesh, seeds);
             int lump_index = 0;
             foreach (var lump in lumps)
             {
                 //build a mesh, game object etc. for this chunk
                 //Mesh chunk_mesh = VolumetricTetraBuilder.BuildMeshForLump(lump);
                 Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForLump(lump);
-                //Mesh chunk_mesh = TetraUnionBuilder.BuildUnionFromTetra(lump);
+                //Mesh chunk_mesh = UnionMeshChunkBuilder.BuildUnionMeshForLump(lump);
+                //Mesh chunk_mesh = VolumetricLumpReconstructor.BuildMeshFromLump(lump);
 
                 GameObject chunk_object = new GameObject("TetraLump_" + lump_index);
                 chunk_object.transform.SetParent(this.transform, false);
@@ -132,15 +154,12 @@ public class VoronoiTest3D : MonoBehaviour
         //print number of triangle of mesh
         Debug.Log(Equals(object_mesh.triangles.Length, 0) ? "No triangles in mesh" : "Number of triangles in mesh: " + object_mesh.triangles.Length);
 
-        object_planes = GetPlanesFromMesh(object_mesh);
-        Debug.Log("Extracted " + object_planes.Count + " planes from object mesh.");
-
         //generate sites!
         GenerateVoronoiSites();
         //generate diagram using sites!
         GenerateVoronoiDiagram();
         //map sites to VoronoiVertex
-        MapSitesToVertices();
+        //MapSitesToVertices();
         //BuildAllVoronoiCells();
     }
 
@@ -231,156 +250,6 @@ public class VoronoiTest3D : MonoBehaviour
         }
     }
 
-    void MapSitesToVertices()
-    {
-        //creates a dictionary mapping from each original site (Vector3) to the corresponding VoronoiVertex.
-        //input_vertices correspond directly to voronoi_sites by index, we can do a direct mapping.
-        site_to_vertex_map = new Dictionary<Vector3, VoronoiVertex>();
-        for (int i = 0; i < voronoi_sites.Count; i++)
-        {
-            site_to_vertex_map[voronoi_sites[i]] = input_vertices[i];
-        }
-    }
-
-    void BuildAllVoronoiCells()
-    {
-        foreach (var site in voronoi_sites)
-        {
-            BuildVoronoiCellForSite(site);
-        }
-    }
-
-    void BuildVoronoiCellForSite(Vector3 site_pos)
-    {
-        if (!site_to_vertex_map.ContainsKey(site_pos))
-        {
-            return;
-        }
-
-        VoronoiVertex site_vertex = site_to_vertex_map[site_pos];
-
-        var cells_with_site = voronoi_mesh.Vertices.Where(v => v.Vertices.Contains(site_vertex)).ToList();
-
-        List<Vector3> circumcenters = new List<Vector3>();
-        foreach (var cells in cells_with_site)
-        {
-            cells.ComputeCircumcenter();
-            circumcenters.Add(cells.Circumcenter);
-        }
-
-        //create fragment mesh from circumcenters
-        Mesh fragment_mesh = CreateMeshFromCircumcenters(circumcenters);
-
-        //convert fragment mesh to polyhedron for clipping
-        Polyhedron fragment_polyhedron = MeshToPolyhedron(fragment_mesh);
-
-        //clip polyhedron against object planes
-        Polyhedron clipped_polyhedron = ClipPolyhedronAgainstObjectPlanes(fragment_polyhedron, object_planes);
-        Debug.Log($"Polyhedron after final clip: faces={clipped_polyhedron.faces.Count}");
-
-        //convert clipped polyhedron back to mesh
-        Mesh clipped_mesh = BuildMeshFromPolyhedron(clipped_polyhedron);
-        //and then instantiate as a fragment game object
-        CreateFragmentGameObject(clipped_mesh);
-    }
-
-    Mesh CreateMeshFromCircumcenters(List<Vector3> points)
-    {
-        var hull_vertices = points.Select(v => new DefaultVertex { Position = new double[] { v.x, v.y, v.z } }).ToList();
-        var hull = ConvexHull.Create(hull_vertices);
-        return CreateMeshFromHull(hull.Result);
-    }
-
-    Mesh CreateMeshFromHull(ConvexHull<DefaultVertex, DefaultConvexFace<DefaultVertex>> hull)
-    {
-        var hull_points = hull.Points.ToList();
-        Vector3[] mesh_vertices = new Vector3[hull_points.Count];
-        Dictionary<Vector3, int> vertex_to_index = new Dictionary<Vector3, int>();
-
-        for (int i = 0; i < hull_points.Count; i++)
-        {
-            var pos = hull_points[i].Position;
-            Vector3 v = new Vector3((float)pos[0], (float)pos[1], (float)pos[2]);
-            mesh_vertices[i] = v;
-            vertex_to_index[v] = i;
-        }
-
-        List<int> triangles = new List<int>();
-        foreach (var face in hull.Faces)
-        {
-            Vector3 va = new Vector3((float)face.Vertices[0].Position[0], (float)face.Vertices[0].Position[1], (float)face.Vertices[0].Position[2]);
-            Vector3 vb = new Vector3((float)face.Vertices[1].Position[0], (float)face.Vertices[1].Position[1], (float)face.Vertices[1].Position[2]);
-            Vector3 vc = new Vector3((float)face.Vertices[2].Position[0], (float)face.Vertices[2].Position[1], (float)face.Vertices[2].Position[2]);
-
-            int a = vertex_to_index[va];
-            int b = vertex_to_index[vb];
-            int c = vertex_to_index[vc];
-
-            triangles.Add(a);
-            triangles.Add(b);
-            triangles.Add(c);
-        }
-
-        Mesh mesh = new Mesh();
-        mesh.vertices = mesh_vertices;
-        mesh.triangles = triangles.ToArray();
-        mesh.RecalculateNormals();
-        return mesh;
-    }
-
-    void CreateFragmentGameObject(Mesh mesh)
-    {
-        //create a new GameObject to represent the fragment
-        GameObject fragment = new GameObject("Fragment");
-        fragment.transform.parent = transform;
-        fragment.transform.localPosition = Vector3.zero;
-        fragment.transform.localRotation = Quaternion.identity;
-        fragment.transform.localScale = Vector3.one;
-
-        MeshFilter mesh_filter = fragment.AddComponent<MeshFilter>();
-        mesh_filter.mesh = mesh;
-
-        MeshRenderer mesh_renderer = fragment.AddComponent<MeshRenderer>();
-        if (GetComponent<MeshRenderer>() != null)
-        {
-            mesh_renderer.sharedMaterial = GetComponent<MeshRenderer>().sharedMaterial;
-        }
-
-        //turn off culling for debug purposes
-        //Material debug_mat = new Material(Shader.Find("Standard"));
-        //debug_mat.SetInt("_CullMode", (int)UnityEngine.Rendering.CullMode.Off);
-        //mesh_renderer.sharedMaterial = debug_mat;
-
-
-        MeshCollider mesh_collider = fragment.AddComponent<MeshCollider>();
-        mesh_collider.sharedMesh = mesh;
-        mesh_collider.convex = true;
-
-        Rigidbody rigidbody = fragment.AddComponent<Rigidbody>();
-        rigidbody.isKinematic = true; //fragments stable until fracture
-    }
-
-    void Fracture(Vector3 hit_point)
-    {
-        if (GetComponent<Renderer>() != null) GetComponent<Renderer>().enabled = false;
-        if (GetComponent<Collider>() != null) GetComponent<Collider>().enabled = false;
-
-        //params for force when hit
-        float explosion_force = 5.0f;
-        float explosion_radius = 3.0f;
-        float upwards_modifier = 0.1f;
-
-        // Activate physics on all fragments
-        foreach (Transform fragment in transform)
-        {
-            Rigidbody rigidbody = fragment.GetComponent<Rigidbody>();
-            if (rigidbody != null)
-            {
-                rigidbody.isKinematic = false;
-                rigidbody.AddExplosionForce(explosion_force, hit_point, explosion_radius, upwards_modifier, ForceMode.Impulse);
-            }
-        }
-    }
 
     void FractureVolumetric(Vector3 hit_point)
     {
@@ -438,362 +307,41 @@ public class VoronoiTest3D : MonoBehaviour
         return planes;
     }
 
-    private Polyhedron MeshToPolyhedron(Mesh mesh)
+    public static float ComputeMeshVolume(Mesh mesh)
     {
-        Polyhedron polyhedron = new Polyhedron();
+        float volume = 0f;
         Vector3[] verts = mesh.vertices;
         int[] tris = mesh.triangles;
 
-        //one triangle = one Polygon3D
         for (int i = 0; i < tris.Length; i += 3)
         {
-            Vector3 v0 = verts[tris[i]];
-            Vector3 v1 = verts[tris[i + 1]];
-            Vector3 v2 = verts[tris[i + 2]];
-
-            Polygon3D face = new Polygon3D(new List<Vector3> { v0, v1, v2 });
-            polyhedron.faces.Add(face);
+            Vector3 p0 = verts[tris[i]];
+            Vector3 p1 = verts[tris[i + 1]];
+            Vector3 p2 = verts[tris[i + 2]];
+            volume += Vector3.Dot(p0, Vector3.Cross(p1, p2)) / 6f;
         }
-        return polyhedron;
+
+        return Mathf.Abs(volume);
     }
 
-    private Polygon3D ClipPolygonExtended(Polygon3D face, Vector3 plane_normal, float plane_distance, float epsilon, out List<Edge3D> out_edges)
+    public static float ComputeMeshVolumeLocal(Mesh localMesh)
     {
-        out_edges = new List<Edge3D>();
+        float volume = 0f;
+        Vector3[] verts = localMesh.vertices;
+        int[] tris = localMesh.triangles;
 
-        //track how many vertices in/out of plane
-        int inside_count = 0;
-        int outside_count = 0;
-
-        int vert_count = face.vertices.Count;
-        var distances = new float[vert_count];
-        for (int i = 0; i < vert_count; i++)
+        for (int i = 0; i < tris.Length; i += 3)
         {
-            float dist = Vector3.Dot(face.vertices[i], plane_normal) + plane_distance;
-            distances[i] = dist;
-
-            if (dist < -epsilon)
-                outside_count++;
-            else
-                inside_count++;
+            Vector3 p0 = verts[tris[i]];
+            Vector3 p1 = verts[tris[i + 1]];
+            Vector3 p2 = verts[tris[i + 2]];
+            volume += Vector3.Dot(p0, Vector3.Cross(p1, p2)) / 6f;
         }
-
-        //if fully outside discard
-        if (outside_count == vert_count)
-        {
-            return new Polygon3D(); // empty so discard
-        }
-        //if fully inside keep
-        if (inside_count == vert_count)
-        {
-            return face;
-        }
-
-        //collect intersection points
-        //store them as pairs of (indexOfEdgeStart, intersectionPos)
-        List<(int i0, Vector3 point)> intersection_points = new List<(int, Vector3)>();
-        int intersection_count = 0;
-
-        List<Vector3> new_verts = new List<Vector3>();
-
-        for (int i = 0; i < vert_count; i++)
-        {
-            int next = (i + 1) % vert_count;
-            float distA = distances[i];
-            float distB = distances[next];
-
-            bool insideA = distA >= -epsilon;
-            bool insideB = distB >= -epsilon;
-
-            Vector3 vA = face.vertices[i];
-            Vector3 vB = face.vertices[next];
-
-            //if A is inside, keep it
-            if (insideA)
-            {
-                new_verts.Add(vA);
-            }
-
-            //if crossing plane from inside->outside or outside->inside
-            if (insideA != insideB)
-            {
-                float total = distA - distB;
-                if (Mathf.Abs(total) < 1e-12f)
-                {
-                    //degenerate, skip or handle
-                    continue;
-                }
-                float t = distA / (distA - distB);
-                Vector3 inter_pt = Vector3.Lerp(vA, vB, t);
-
-                new_verts.Add(inter_pt);
-                intersection_points.Add((new_verts.Count - 1, inter_pt));
-                //store the index in newVerts so we can refer to it later
-
-                intersection_count++;
-            }
-        }
-
-        //build out_edges from intersection points 
-        //pair them in sets of two, as chords.
-        //if intersection_count != 2 or 4, we do fallback or partial approach.
-
-        if (intersection_count == 0)
-        {
-            //face is fully inside or outside.
-            if (outside_count == 0) return face; // fully in
-            else return new Polygon3D();       // fully out
-        }
-        else if (intersection_count == 2)
-        {
-            // single chord,  the two intersectionPoints form one Edge3D
-            if (intersection_points.Count == 2)
-            {
-                out_edges.Add(new Edge3D(
-                    intersection_points[0].point,
-                    intersection_points[1].point
-                ));
-            }
-            // return the clipped face
-            return new Polygon3D(new_verts);
-        }
-        else if (intersection_count == 4)
-        {
-            if (intersection_points.Count == 4)
-            {
-                out_edges.Add(new Edge3D(intersection_points[0].point, intersection_points[1].point));
-                out_edges.Add(new Edge3D(intersection_points[2].point, intersection_points[3].point));
-            }
-
-            return SplitFaceByTwoChords(new_verts, intersection_points, epsilon);
-        }
-        else
-        {
-            // fallback => more than 4 intersection => skip or discard 
-            Debug.LogWarning($"ClipPolygonExtended => {intersection_count} intersections => fallback.");
-            return new Polygon3D(); // discard for now
-            //return face;
-        }
-    }
-
-    private Polygon3D SplitFaceByTwoChords(List<Vector3> newVerts, List<(int idx, Vector3 pt)> intersectionPoints, float epsilon)
-    {
-       //need to implement proper two chord approach (no longer needed currently)
-        return new Polygon3D(newVerts);
-    }
-
-    private Polyhedron StrictClipPolyhedronAgainstPlane(Polyhedron polyhedron, Vector3 plane_normal, float plane_distance, float epsilon, out List<Edge3D> intersection_edges)
-    {
-        intersection_edges = new List<Edge3D>();
-        Polyhedron clipped_polyhedron = new Polyhedron();
-
-        foreach (Polygon3D face in polyhedron.faces)
-        {
-            List<Edge3D> face_edges;
-            //was StrictClipPolygonAgainstPlane
-            Polygon3D clipped = ClipPolygonExtended(face, plane_normal, plane_distance, epsilon, out face_edges);
-
-            intersection_edges.AddRange(face_edges);
-
-            //if clipped is not empty, it’s inside
-            if (clipped.vertices.Count >= 3)
-            {
-                clipped_polyhedron.faces.Add(clipped);
-            }
-            // else discard
-        }
-        return clipped_polyhedron;
-    }
-
-    private Polyhedron ClipPolyhedronAgainstObjectPlanes(Polyhedron fragment_polyhedron, List<plane_data> object_planes)
-    {
-        Polyhedron current_polyhedron = fragment_polyhedron;
-        foreach (plane_data plane in object_planes)
-        {
-            List<Edge3D> intersection_edges;
-            current_polyhedron = StrictClipPolyhedronAgainstPlane(current_polyhedron, plane.normal, plane.distance, fracture_epsilon, out intersection_edges);
-
-            //then do capping with those edges
-            List<List<Vector3>> loops = CappingUtilities.BuildRobustCapLoops(intersection_edges, fracture_epsilon);
-            foreach (var loop in loops)
-            {
-                if (loop.Count < 3) continue;
-
-                Polygon3D cap_face = new Polygon3D(loop);
-
-                //optionally check orientation vs. plane.normal
-                // e.g. if dot(ComputeFaceNormal(cap_face), plane.normal) < 0 => cap_face.vertices.Reverse();
-
-                current_polyhedron.faces.Add(cap_face);
-            }
-        }
-        return current_polyhedron;
-    }
-
-    private void SortPolygonVerts(Polygon3D face)
-    {
-        Vector3 centroid = Vector3.zero;
-        foreach (var vec in face.vertices)
-        {
-            centroid += vec;
-        }
-        centroid /= face.vertices.Count;
-
-        Vector3 normal = PolyhedronCleanup.ComputeFaceNormal(face);
-        if (normal == Vector3.zero)
-        {
-            return;
-        }
-
-        //project onto a plane, if normal = (0,0,1) then project x,y
-        //if normal is arbitrary (not aligned with the standard x, y, or z axes), choose an orthonormal basis
-        Vector3 u = Vector3.Cross(normal, Vector3.up);
-        if (u.sqrMagnitude < 1e-6f)
-            u = Vector3.Cross(normal, Vector3.right);
-        u.Normalize();
-        Vector3 v = Vector3.Cross(normal, u);
-
-        List<(Vector3 vertex, float angle)> angled_verts = new List<(Vector3 vertex, float angle)>();
-        foreach (var vertex in face.vertices)
-        {
-            Vector3 relative = vertex - centroid;
-            //project relative vector onto u,v plane
-            float x = Vector3.Dot(relative, u);
-            float y = Vector3.Dot(relative, v);
-
-            float angle = Mathf.Atan2(y, x);
-            angled_verts.Add((vertex, angle));
-        }
-
-        //sort by angle and then update face vertices in this order
-        angled_verts.Sort((a, b) => a.angle.CompareTo(b.angle));
-        face.vertices = angled_verts.Select(x => x.vertex).ToList();
-    }
-
-    private Mesh BuildMeshFromPolyhedron(Polyhedron poly)
-    {
-        PolyhedronCleanup.FinalizePolyhedron(poly, 1e-4f); //1e-5f, 1e-6f, 1e-4f
-        //Debug.Log($"BuildMeshFromPolyhedron => poly.faces.Count = {poly.faces.Count}");
-
-        //convert each face to triangles
-        List<Vector3> verts = new List<Vector3>();
-        List<int> triangles = new List<int>();
-        //int index_offset = 0;
-
-        foreach (var face in poly.faces)
-        {
-            if (face.vertices.Count < 3) continue;
-
-            SortPolygonVerts(face);
-
-            /*
-            //triangle fan approch for triangulation of convex face for each polygon
-            //if still fucked look into ear clipping algorithm
-            for (int i = 1; i < face.vertices.Count - 1; i++)
-            {
-                verts.Add(face.vertices[0]);
-                verts.Add(face.vertices[i]);
-                verts.Add(face.vertices[i + 1]);
-
-                triangles.Add(index_offset);
-                triangles.Add(index_offset + 1);
-                triangles.Add(index_offset + 2);
-                index_offset += 3;
-            }*/
-
-            Vector3 faceNormal = PolyhedronCleanup.ComputeFaceNormal(face);
-            if (faceNormal == Vector3.zero || face.vertices.Count < 3)
-                continue;
-
-            /*if (!EarClippingTriangulation.IsCCW(face.vertices, faceNormal))
-            {
-                // Flip to ensure CCW
-                face.vertices.Reverse();
-            }*/
-
-            //ear clipping
-            /*List<int> localTriangles = EarClippingTriangulation.Triangulate(face.vertices, faceNormal);
-            if (localTriangles.Count < 3)
-            {
-                // Possibly we couldn't triangulate this polygon
-                continue;
-            }*/
-            List<int> local_tri_incidices = TriangulateProjected(face, faceNormal);
-            if (local_tri_incidices.Count < 3)
-                continue;
-
-
-            int baseIndex = verts.Count;
-            verts.AddRange(face.vertices);
-
-            for (int i = 0; i < local_tri_incidices.Count; i++)
-            {
-                triangles.Add(baseIndex + local_tri_incidices[i]);
-            }
-        }
-
-        Mesh clipped_mesh = new Mesh();
-        clipped_mesh.vertices = verts.ToArray();
-        clipped_mesh.triangles = triangles.ToArray();
-        clipped_mesh.RecalculateNormals();
-
-        //optionally skip extremely small bounding boxes
-        /*if (IsMeshTooSmall(clipped_mesh, 0.01f))
-        {
-            // Return an empty mesh or skip creation
-            Debug.LogWarning("Skipping a tiny fragment => won't create fragment object");
-            return new Mesh();
-        }*/
-
-        //Debug.Log($"Final mesh => vertexCount={clipped_mesh.vertexCount}, triCount={clipped_mesh.triangles.Length / 3}");
-
-        return clipped_mesh;
-    }
-
-    public static List<int> TriangulateProjected(Polygon3D face, Vector3 face_normal)
-    {
-        //compute face centroid
-        Vector3 centroid = Vector3.zero;
-        for (int i = 0; i < face.vertices.Count; i++)
-            centroid += face.vertices[i];
-        centroid /= face.vertices.Count;
-
-        //build orthonormal basis (u, v) for faceNormal
-        //pick 'u' as cross( faceNormal, up ) unless it’s near collinear
-        Vector3 up = Vector3.up;
-        if (Vector3.Dot(up, face_normal) > 0.9f)
-            up = Vector3.right;
-        // or some fallback
-
-        Vector3 u = Vector3.Cross(face_normal, up).normalized;
-        Vector3 v = Vector3.Cross(face_normal, u);  // guaranteed orthonormal
-
-        //project each vertex from 3D -> 2D
-        List<Vector2> projected2D = new List<Vector2>(face.vertices.Count);
-        for (int i = 0; i < face.vertices.Count; i++)
-        {
-            Vector3 r = face.vertices[i] - centroid;
-            float x = Vector3.Dot(r, u);
-            float y = Vector3.Dot(r, v);
-            projected2D.Add(new Vector2(x, y));
-        }
-
-        //ear-clip in 2D
-        List<int> localTriIndices2D = EarClippingTriangulation2D.Triangulate2D(projected2D);
-
-        //now we have indices referencing projected2D. We need to map them back
-        // But actually only need the ordering, because we'll add them to the final mesh 
-        // in the same order we see them.
-
-        // We'll return localTriIndices2D. 
-        // The final code that calls this will know "face.vertices" in the same index order as projected2D.
-        // i.e., face.vertices[i] -> projected2D[i].
-
-        return localTriIndices2D;
+        return Mathf.Abs(volume);
     }
 
     private void OnDrawGizmos()
-    {
+    {/*
         //set Gizmos matrix to the cube's transform, so all gizmos drawn are relative to the cube in world space
         Gizmos.matrix = transform.localToWorldMatrix;
 
@@ -834,6 +382,46 @@ public class VoronoiTest3D : MonoBehaviour
                 Gizmos.DrawSphere(cell.Circumcenter, 0.01f);
             }
         }
+
+        //TETRA BUILDER DEBUG SHIT
+        */
+        /*if (VolumetricTetraBuilder.debug_sample_points != null)
+        {
+            Gizmos.color = Color.red;
+            foreach (var local_point in VolumetricTetraBuilder.debug_sample_points)
+            {
+                Vector3 world_point = transform.TransformPoint(local_point);
+                Gizmos.DrawSphere(world_point, 0.02f);
+            }
+        }
+
+        Gizmos.color = Color.green;
+        foreach (var cell in tetra_mesh.Cells)
+        {
+            if (cell.Vertices == null || cell.Vertices.Length < 4)
+                continue;
+
+            // Convert each vertex from local to world coordinates.
+            Vector3 p0 = transform.TransformPoint(ToV3(cell.Vertices[0]));
+            Vector3 p1 = transform.TransformPoint(ToV3(cell.Vertices[1]));
+            Vector3 p2 = transform.TransformPoint(ToV3(cell.Vertices[2]));
+            Vector3 p3 = transform.TransformPoint(ToV3(cell.Vertices[3]));
+
+            // Draw edges for the tetrahedron.
+            Gizmos.DrawLine(p0, p1);
+            Gizmos.DrawLine(p0, p2);
+            Gizmos.DrawLine(p0, p3);
+            Gizmos.DrawLine(p1, p2);
+            Gizmos.DrawLine(p1, p3);
+            Gizmos.DrawLine(p2, p3);
+        }
+
         Gizmos.matrix = Matrix4x4.identity;
+        */
+    }
+
+    private Vector3 ToV3(TetraVertex tv)
+    {
+        return new Vector3((float)tv.Position[0], (float)tv.Position[1], (float)tv.Position[2]);
     }
 }
