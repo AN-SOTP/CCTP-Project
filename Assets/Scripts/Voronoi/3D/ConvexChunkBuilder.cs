@@ -45,7 +45,9 @@ public static class ConvexHullChunkBuilder
         //convert the hull faces to a mesh
         //return CreateMeshFromHull(hull_result.Result);
         Mesh chunk_mesh = CreateMeshFromHull(hull_result.Result);
-        InwardOffsetMesh(chunk_mesh, 0.95f);
+
+        //to try prevent z-fighting (DONE AFTER CLIPPING IN VORONOITEST3D NOW)
+        //InwardOffsetMesh(chunk_mesh, 0.55f);
 
         return chunk_mesh;
     }
@@ -98,7 +100,7 @@ public static class ConvexHullChunkBuilder
         return mesh;
     }
 
-    private static void InwardOffsetMesh(Mesh mesh, float scaleFactor)
+    private static void InwardOffsetMesh(Mesh mesh, float scale_factor)
     {
         Vector3[] verts = mesh.vertices;
         if (verts.Length == 0)
@@ -117,7 +119,7 @@ public static class ConvexHullChunkBuilder
         for (int i = 0; i < verts.Length; i++)
         {
             Vector3 offset = verts[i] - centroid;
-            verts[i] = centroid + offset * scaleFactor;
+            verts[i] = centroid + offset * scale_factor;
         }
 
         mesh.vertices = verts;

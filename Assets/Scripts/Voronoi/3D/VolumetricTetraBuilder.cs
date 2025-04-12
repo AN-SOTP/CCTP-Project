@@ -61,16 +61,15 @@ public class VolumetricTetraBuilder
     }
 
     //a simplified method to randomly sample points inside the mesh volume.
-    //checks if a point is inside using a simple raycast approach or anything else you prefer.
-    //can be improved for uniformity or other distributions.
+    //checks if a point is inside using raycast
     private List<Vector3> SampleInsidePoints(Mesh mesh, int count)
     {
         List<Vector3> result = new List<Vector3>();
         Bounds b = mesh.bounds;
-        int max_attempts = count * 10; // some extra attempts in case we fail to find enough
+        //int max_attempts = count * 10; // some extra attempts in case we fail to find enough
 
         int attempts = 0;
-        while (result.Count < count && attempts < max_attempts)
+        while (result.Count < count)
         {
             attempts++;
             // Pick a random point in bounding box (local coords)
@@ -134,7 +133,7 @@ public class VolumetricTetraBuilder
     }
 
     //"point in mesh" test using a ray intersection count in local space
-    private bool IsPointInsideMesh(Vector3 point, Mesh mesh)
+    public static bool IsPointInsideMesh(Vector3 point, Mesh mesh)
     {
         Vector3[] verts = mesh.vertices;
         int[] tris = mesh.triangles;
@@ -157,12 +156,11 @@ public class VolumetricTetraBuilder
                 hit_count++;
             }
         }
-
         return (hit_count % 2 == 1);
     }
 
     //Möller–Trumbore intersection
-    private bool RayTriangleIntersect(Vector3 ray_origin, Vector3 ray_dir, Vector3 v0, Vector3 v1, Vector3 v2)
+    private static bool RayTriangleIntersect(Vector3 ray_origin, Vector3 ray_dir, Vector3 v0, Vector3 v1, Vector3 v2)
     {
         Vector3 e1 = v1 - v0;
         Vector3 e2 = v2 - v0;
@@ -319,4 +317,53 @@ public class VolumetricTetraBuilder
     {
         return new Vector3((float)tv.Position[0], (float)tv.Position[1], (float)tv.Position[2]);
     }
+
+    //POISSON DISK SAMPLING STUFF not quite working rn
+    public static List<Vector3> PoissonSampleInsideMesh(Mesh mesh, float min_dist, int new_points_count, int max_sampless)
+    {
+        Bounds bounds = mesh.bounds;
+        List<Vector3> all_candidates = PoissonDisk3D.Generate3D(bounds, min_dist, new_points_count, max_sampless);
+        List<Vector3> inside = new List<Vector3>();
+        foreach (var candidate in all_candidates)
+        {
+            if (IsPointInsideMesh(candidate, mesh))
+            {
+                inside.Add(candidate);
+            }
+        }
+        return inside;
+    }
+
+    public DelaunayTriangulation<TetraVertex, TetraCell> BuildTetraMeshPoisson(Mesh source_mesh, float min_dist, int new_points_count, int max_samples)
+    {
+        //generates Poisson-disk points inside bounding box
+        List<Vector3> candidates = PoissonSampleInsideMesh(source_mesh, min_dist, new_points_count, max_samples);
+
+        if (candidates.Count < 4)
+        {
+            Debug.LogWarning($"Not enough inside points (only {candidates.Count}) for 3D triangulation.");
+            return null;
+        }
+
+        List<TetraVertex> tetra_vertices = new List<TetraVertex>(candidates.Count);
+        foreach (var p in candidates)
+        {
+            tetra_vertices.Add(new TetraVertex(p.x, p.y, p.z));
+        }
+
+        float scale = Mathf.Max(source_mesh.bounds.size.x, source_mesh.bounds.size.y, source_mesh.bounds.size.z);
+        float tolerance = 1e-7f * scale;
+        DelaunayTriangulation<TetraVertex, TetraCell> tetra_mesh = null;
+        try
+        {
+            tetra_mesh = DelaunayTriangulation<TetraVertex, TetraCell>.Create(tetra_vertices, tolerance);
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError("Error building Delaunay triangulation: " + ex.Message);
+        }
+
+        return tetra_mesh;
+    }
+
 }

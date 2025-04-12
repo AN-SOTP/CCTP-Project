@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using MIConvexHull;
+using Parabox.CSG;
 using Sabresaurus;
 using Sabresaurus.SabreCSG;
 using Unity.VisualScripting;
@@ -16,7 +17,7 @@ public class VoronoiTest3D : MonoBehaviour
 {
     //local bounds volume of cube mesh
     private Bounds object_bounds;
-    public int num_of_sites = 10;
+    public int num_of_sites;
     //list of 3d positions of voronoi sites
     public List<Vector3> voronoi_sites = new List<Vector3>();
     //list of voronoi cells within cube bounds
@@ -79,66 +80,22 @@ public class VoronoiTest3D : MonoBehaviour
         VolumetricTetraBuilder builder = new VolumetricTetraBuilder();
 
         //build a tetrahedral volume
-        float volume = ComputeMeshVolume(object_mesh);
+        //float volume = ComputeMeshVolume(object_mesh);
         //float volume = ComputeMeshVolumeLocal(object_mesh);
-        int interior_count = Mathf.RoundToInt(volume * 50f);
+        float volume = ComputeMeshVolumeWorld(object_mesh, transform);
+        int interior_count = Mathf.RoundToInt(volume * 5.0f);
+        Debug.Log(this.name + ": " + interior_count + "points");
+        num_of_sites = Mathf.RoundToInt(volume * 0.05f);
+        Debug.Log(this.name + ": " + num_of_sites + "sites");
         tetra_mesh = builder.BuildTetraMesh(object_mesh, interior_count);
+        //float min_dist = Mathf.Min(object_mesh.bounds.size.x, object_mesh.bounds.size.y, object_mesh.bounds.size.z) * 0.05f;
+        //tetra_mesh = builder.BuildTetraMeshPoisson(object_mesh, min_dist, 30, 5000);
         if (tetra_mesh == null)
         {
             Debug.LogWarning("Failed to build tetra mesh!");
         }
         else
         {
-            var all_cells = tetra_mesh.Cells.ToList();
-            //Dictionary<TetraCell, List<TetraCell>> adjacency = TetraAdjacency.BuildAdjacencyGraph(tetra_mesh);
-            //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOut(tetra_mesh, seed_groups, object_mesh, 0.1f);
-
-            //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOutAdaptive(tetra_mesh, object_mesh, 25, 0.05f, 10); 
-            List<Vector3> seeds = new List<Vector3>();
-            Bounds b = object_mesh.bounds;
-            for (int i = 0; i < num_of_sites; i++)
-            {
-                float x = UnityEngine.Random.Range(b.min.x, b.max.x);
-                float y = UnityEngine.Random.Range(b.min.y, b.max.y);
-                float z = UnityEngine.Random.Range(b.min.z, b.max.z);
-                seeds.Add(new Vector3(x, y, z));
-            }
-            var lumps = TetraPartitioner.Partition(tetra_mesh, seeds);
-
-            // optional extra bounding box cull
-            Bounds mesh_bounds = object_mesh.bounds;
-
-            //var lumps = TetraLumpPartitioner.PartitionTetraMesh(tetra_mesh, seeds);
-            int lump_index = 0;
-            foreach (var lump in lumps)
-            {
-                //build a mesh, game object etc. for this chunk
-                //Mesh chunk_mesh = VolumetricTetraBuilder.BuildMeshForLump(lump);
-                Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForLump(lump);
-                //Mesh chunk_mesh = UnionMeshChunkBuilder.BuildUnionMeshForLump(lump);
-                //Mesh chunk_mesh = VolumetricLumpReconstructor.BuildMeshFromLump(lump);
-
-                GameObject chunk_object = new GameObject("TetraLump_" + lump_index);
-                chunk_object.transform.SetParent(this.transform, false);
-
-                MeshFilter mf = chunk_object.AddComponent<MeshFilter>();
-                mf.sharedMesh = chunk_mesh;
-
-                MeshRenderer mr = chunk_object.AddComponent<MeshRenderer>();
-               // mr.material = new Material(Shader.Find("Standard"));
-                mr.material = this.GetComponent<MeshRenderer>().sharedMaterial;
-                //mr.material.color = Color.Lerp(Color.red, Color.yellow, UnityEngine.Random.value);
-
-                MeshCollider mc = chunk_object.AddComponent<MeshCollider>();
-                mc.sharedMesh = chunk_mesh;
-                mc.convex = true;
-
-                Rigidbody rb = chunk_object.AddComponent<Rigidbody>();
-                rb.isKinematic = true;
-
-                chunk_objects.Add(chunk_object);
-                lump_index++;
-            }
             
         }
 
@@ -153,6 +110,8 @@ public class VoronoiTest3D : MonoBehaviour
 
         //print number of triangle of mesh
         Debug.Log(Equals(object_mesh.triangles.Length, 0) ? "No triangles in mesh" : "Number of triangles in mesh: " + object_mesh.triangles.Length);
+
+        CreateLumpsWithoutHitPoint(object_mesh);
 
         //generate sites!
         GenerateVoronoiSites();
@@ -253,13 +212,21 @@ public class VoronoiTest3D : MonoBehaviour
 
     void FractureVolumetric(Vector3 hit_point)
     {
-        if (GetComponent<Renderer>() != null) GetComponent<Renderer>().enabled = false;
-        if (GetComponent<Collider>() != null) GetComponent<Collider>().enabled = false;
+        //CreateLumps(this.GetComponent<MeshFilter>().sharedMesh, hit_point);
+
+        if (GetComponent<Renderer>() != null)
+        {
+            GetComponent<Renderer>().enabled = false;
+        }
+        if (GetComponent<Collider>() != null)
+        {
+            GetComponent<Collider>().enabled = false;
+        }
 
         //params for force when hit
-        float explosion_force = 5.0f;
-        float explosion_radius = 3.0f;
-        float upwards_modifier = 0.1f;
+        float explosion_force = 0.33f;
+        float explosion_radius = 0.50f;
+        float upwards_modifier = 0.10f;
 
         foreach (GameObject chunk in chunk_objects)
         {
@@ -282,31 +249,6 @@ public class VoronoiTest3D : MonoBehaviour
         return extented_bounds.Contains(point);
     }
 
-    private List<plane_data> GetPlanesFromMesh(Mesh mesh)
-    {
-        List<plane_data> planes = new List<plane_data>();
-        Vector3[] verts = mesh.vertices;
-        int[] tris = mesh.triangles;
-        //set of 3 indices = 1 triangle
-        for (int i = 0; i < tris.Length; i += 3)
-        {
-            Vector3 v0 = verts[tris[i]];
-            Vector3 v1 = verts[tris[i + 1]];
-            Vector3 v2 = verts[tris[i + 2]];
-            //compute normal
-            Vector3 normal = Vector3.Cross(v1 - v0, v2 - v0).normalized;
-            //compute plane distance
-            float distance = Vector3.Dot(normal, v0);
-
-            planes.Add(new plane_data
-            {
-                normal = normal,
-                distance = distance
-            });
-        }
-        return planes;
-    }
-
     public static float ComputeMeshVolume(Mesh mesh)
     {
         float volume = 0f;
@@ -324,6 +266,22 @@ public class VoronoiTest3D : MonoBehaviour
         return Mathf.Abs(volume);
     }
 
+    public static float ComputeMeshVolumeWorld(Mesh mesh, Transform transform)
+    {
+        float volume = 0f;
+        Vector3[] verts = mesh.vertices;
+        int[] tris = mesh.triangles;
+        Matrix4x4 local_to_world = transform.localToWorldMatrix;
+        for (int i = 0; i < tris.Length; i += 3)
+        {
+            Vector3 p0 = local_to_world.MultiplyPoint3x4(verts[tris[i]]);
+            Vector3 p1 = local_to_world.MultiplyPoint3x4(verts[tris[i + 1]]);
+            Vector3 p2 = local_to_world.MultiplyPoint3x4(verts[tris[i + 2]]);
+            volume += Mathf.Abs(Vector3.Dot(p0, Vector3.Cross(p1, p2)) / 6f);
+        }
+        return volume;
+    }
+
     public static float ComputeMeshVolumeLocal(Mesh localMesh)
     {
         float volume = 0f;
@@ -339,6 +297,396 @@ public class VoronoiTest3D : MonoBehaviour
         }
         return Mathf.Abs(volume);
     }
+
+    public static List<Vector3> GenerateBiasedSeeds(Vector3 hit_local, Bounds bounds, int num_seeds)
+    {
+        List<Vector3> seeds = new List<Vector3>();
+        seeds.Add(hit_local);
+
+        float sigma = Mathf.Min(bounds.size.x, bounds.size.y, bounds.size.z) * 0.5f;
+        int seeds_to_generate = num_seeds - 1;
+        int attempts = 0;
+        while (seeds.Count < num_seeds)
+        {
+            attempts++;
+            Vector3 offset = new Vector3(NextGaussian(0, sigma), NextGaussian(0, sigma), NextGaussian(0, sigma));
+            Vector3 candidate = hit_local + offset;
+
+            candidate.x = Mathf.Clamp(candidate.x, bounds.min.x, bounds.max.x);
+            candidate.y = Mathf.Clamp(candidate.y, bounds.min.y, bounds.max.y);
+            candidate.z = Mathf.Clamp(candidate.z, bounds.min.z, bounds.max.z);
+
+            seeds.Add(candidate);
+        }
+
+        return seeds;
+    }
+
+    public static List<Vector3> GenerateUniformSeeds(Bounds bounds, int num_seeds)
+    {
+        List<Vector3> seeds = new List<Vector3>();
+        for (int i = 0; i < num_seeds; i++)
+        {
+            float x = UnityEngine.Random.Range(bounds.min.x, bounds.max.x);
+            float y = UnityEngine.Random.Range(bounds.min.y, bounds.max.y);
+            float z = UnityEngine.Random.Range(bounds.min.z, bounds.max.z);
+            seeds.Add(new Vector3(x, y, z));
+        }
+        return seeds;
+    }
+
+
+    //random value sampled from a Gaussian
+    private static float NextGaussian(float mean, float std_deviation)
+    {
+        float u1 = 1.0f - UnityEngine.Random.value;
+        float u2 = 1.0f - UnityEngine.Random.value;
+        float rand_std_normal = Mathf.Sqrt(-2.0f * Mathf.Log(u1)) * Mathf.Sin(2.0f * Mathf.PI * u2);
+        return mean + std_deviation * rand_std_normal;
+    }
+
+    void CreateLumps(Mesh object_mesh, Vector3 hit_point)
+    {
+        var all_cells = tetra_mesh.Cells.ToList();
+        //Dictionary<TetraCell, List<TetraCell>> adjacency = TetraAdjacency.BuildAdjacencyGraph(tetra_mesh);
+        //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOut(tetra_mesh, seed_groups, object_mesh, 0.1f);
+
+        //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOutAdaptive(tetra_mesh, object_mesh, 25, 0.05f, 10); 
+        Vector3 hit_local = transform.InverseTransformPoint(hit_point);
+
+        Bounds bounds = object_mesh.bounds;
+        List<Vector3> seeds = GenerateBiasedSeeds(hit_local, bounds, num_of_sites);
+        Debug.Log($"{this.name}: Generated {seeds.Count} biased seeds based on hit at {hit_point}");
+        var lumps = TetraPartitioner.Partition(tetra_mesh, seeds);
+
+        Bounds mesh_bounds = object_mesh.bounds;
+
+        //var lumps = TetraLumpPartitioner.PartitionTetraMesh(tetra_mesh, seeds);
+        int lump_index = 0;
+        foreach (var lump in lumps)
+        {
+            //build a mesh, game object etc. for this chunk
+            //Mesh chunk_mesh = VolumetricTetraBuilder.BuildMeshForLump(lump);
+            Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForLump(lump);
+            //Mesh chunk_mesh = UnionMeshChunkBuilder.BuildUnionMeshForLump(lump);
+            //Mesh chunk_mesh = VolumetricLumpReconstructor.BuildMeshFromLump(lump);
+
+            GameObject chunk_object = new GameObject("TetraLump_" + lump_index);
+            chunk_object.transform.SetParent(this.transform, false);
+
+            MeshFilter mf = chunk_object.AddComponent<MeshFilter>();
+            mf.sharedMesh = chunk_mesh;
+
+            MeshRenderer mr = chunk_object.AddComponent<MeshRenderer>();
+            // mr.material = new Material(Shader.Find("Standard"));
+            mr.material = this.GetComponent<MeshRenderer>().sharedMaterial;
+            //mr.material.color = Color.Lerp(Color.red, Color.yellow, UnityEngine.Random.value);
+
+            MeshCollider mc = chunk_object.AddComponent<MeshCollider>();
+            mc.sharedMesh = chunk_mesh;
+            mc.convex = true;
+
+            Rigidbody rb = chunk_object.AddComponent<Rigidbody>();
+            rb.isKinematic = true;
+
+            ClipChunkToObject(chunk_object, this.gameObject);
+
+            chunk_objects.Add(chunk_object);
+            lump_index++;
+        }
+    }
+
+    void CreateLumpsWithoutHitPoint(Mesh object_mesh)
+    {
+        var all_cells = tetra_mesh.Cells.ToList();
+        
+        //adjacency not used anymore
+        //Dictionary<TetraCell, List<TetraCell>> adjacency = TetraAdjacency.BuildAdjacencyGraph(tetra_mesh);
+        //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOut(tetra_mesh, seed_groups, object_mesh, 0.1f);
+
+        //List<List<TetraCell>> lumps = VoronoiTetraPartitioner.PartitionCarveOutAdaptive(tetra_mesh, object_mesh, 25, 0.05f, 10); 
+
+        Bounds bounds = object_mesh.bounds;
+        List<Vector3> seeds = GenerateUniformSeeds(bounds, num_of_sites);
+        var lumps = TetraPartitioner.Partition(tetra_mesh, seeds);
+
+        Bounds mesh_bounds = object_mesh.bounds;
+
+        //var lumps = TetraLumpPartitioner.PartitionTetraMesh(tetra_mesh, seeds);
+        int lump_index = 0;
+        foreach (var lump in lumps)
+        {
+            //build a mesh, game object etc. for this chunk
+            //Mesh chunk_mesh = VolumetricTetraBuilder.BuildMeshForLump(lump);
+            Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForLump(lump);
+            //Mesh chunk_mesh = UnionMeshChunkBuilder.BuildUnionMeshForLump(lump);
+            //Mesh chunk_mesh = VolumetricLumpReconstructor.BuildMeshFromLump(lump);
+
+            GameObject chunk_object = new GameObject("TetraLump_" + lump_index);
+            chunk_object.transform.SetParent(this.transform, false);
+
+            MeshFilter mf = chunk_object.AddComponent<MeshFilter>();
+            mf.sharedMesh = chunk_mesh;
+
+            MeshRenderer mr = chunk_object.AddComponent<MeshRenderer>();
+            // mr.material = new Material(Shader.Find("Standard"));
+            mr.material = this.GetComponent<MeshRenderer>().sharedMaterial;
+            //mr.material.color = Color.Lerp(Color.red, Color.yellow, UnityEngine.Random.value);
+
+            MeshCollider mc = chunk_object.AddComponent<MeshCollider>();
+            mc.sharedMesh = chunk_mesh;
+            mc.convex = true;
+
+            Rigidbody rb = chunk_object.AddComponent<Rigidbody>();
+            rb.isKinematic = true;
+
+            /*
+            for (int j = 0; j < chunk_objects.Count; j++)
+            {
+                GameObject finalized = chunk_objects[j];
+                SubtractChunkFromChunk(chunk_object, finalized);
+
+                Mesh testMesh = chunk_object.GetComponent<MeshFilter>().mesh;
+                if (testMesh == null || testMesh.vertexCount == 0)
+                {
+                    Debug.Log($"Chunk {lump_index} fully overlapped, discarding");
+                    Destroy(chunk_object);
+                    chunk_object = null;
+                    break;
+                }
+            }
+
+            if (chunk_object != null)
+            {
+                ClipChunkToObject(chunk_object, this.gameObject);
+
+                Mesh final_mesh = chunk_object.GetComponent<MeshFilter>().mesh;
+                if (final_mesh == null || final_mesh.vertexCount == 0)
+                {
+                    Debug.Log($"Chunk {lump_index} oob so discard");
+                    Destroy(chunk_object);
+                    chunk_object = null;
+                }
+                else
+                {
+                    chunk_objects.Add(chunk_object);
+                    lump_index++;
+                }
+            }*/
+
+
+            bool should_clip = false;
+
+            //first bounding box check and then vertex and mid face check
+            Bounds chunk_bounds = chunk_mesh.bounds;
+            if (!bounds.Contains(chunk_bounds.min) || !bounds.Contains(chunk_bounds.max))
+            {
+                should_clip = true;
+            }
+            else
+            {
+                if(ShouldClipChunk(chunk_mesh, chunk_object, this.gameObject))
+                {
+                    should_clip = true;
+                }
+            }
+
+            if(should_clip)
+            {
+                InwardOffsetMesh(chunk_mesh, 0.50f, 0.00f, true);
+
+                ClipChunkToObject(chunk_object, this.gameObject);
+            }
+
+            //ClipChunkToObject(chunk_object, this.gameObject);
+
+            chunk_objects.Add(chunk_object);
+            lump_index++;
+        }
+    }
+
+    public static void ClipChunkToObject(GameObject chunk_object, GameObject original_object)
+    {
+        Mesh chunk_mesh_local = chunk_object.GetComponent<MeshFilter>().mesh;
+        Mesh original_mesh_local = original_object.GetComponent<MeshFilter>().sharedMesh;
+        if (chunk_mesh_local == null || original_mesh_local == null)
+        {
+            Debug.LogError("Missing meshes on chunk_object or original_object!");
+            return;
+        }
+
+        Matrix4x4 chunk_to_world = chunk_object.transform.localToWorldMatrix;
+        Matrix4x4 original_to_world = original_object.transform.localToWorldMatrix;
+
+        Mesh chunk_mesh_world = CloneAndTransformMesh(chunk_mesh_local, chunk_to_world);
+        Mesh original_mesh_world = CloneAndTransformMesh(original_mesh_local, original_to_world);
+
+        Material chunk_mat = GetFirstMaterialOrDefault(chunk_object);
+        Material original_mat = GetFirstMaterialOrDefault(original_object);
+
+        Model clipped_model = CSG.Intersect(chunk_object, original_object);
+        if (clipped_model == null || clipped_model.mesh == null)
+        {
+            Debug.LogWarning("CSG Intersection returned null or empty mesh");
+            return;
+        }
+
+        Mesh clipped_local = CloneAndTransformMesh(clipped_model.mesh, chunk_to_world.inverse);
+
+        chunk_object.GetComponent<MeshFilter>().mesh = clipped_local;
+        chunk_object.GetComponent<MeshRenderer>().sharedMaterials = clipped_model.materials.ToArray();
+
+        clipped_local.RecalculateNormals();
+        clipped_local.RecalculateBounds();
+    }
+
+    private static Mesh CloneAndTransformMesh(Mesh source, Matrix4x4 transform)
+    {
+        Mesh clone = UnityEngine.Object.Instantiate(source);
+
+        Vector3[] verts = clone.vertices;
+        Vector3[] normals = clone.normals;
+        for (int i = 0; i < verts.Length; i++)
+        {
+            verts[i] = transform.MultiplyPoint3x4(verts[i]);
+            if (normals != null && normals.Length == verts.Length)
+            {
+                normals[i] = transform.MultiplyVector(normals[i]);
+            }
+        }
+        clone.vertices = verts;
+        clone.normals = normals;
+        return clone;
+    }
+
+    private static Material GetFirstMaterialOrDefault(GameObject obj)
+    {
+        MeshRenderer mr = obj.GetComponent<MeshRenderer>();
+        if (mr && mr.sharedMaterials != null && mr.sharedMaterials.Length > 0)
+        {
+            return mr.sharedMaterials[0];
+        }
+
+        return new Material(Shader.Find("Standard"));
+    }
+
+    public static void SubtractChunkFromChunk(GameObject chunkA, GameObject chunkB)
+    {
+        Mesh meshA_local = chunkA.GetComponent<MeshFilter>().mesh;
+        Mesh meshB_local = chunkB.GetComponent<MeshFilter>().mesh;
+        if (meshA_local == null || meshB_local == null)
+        {
+            Debug.LogError("SubtractChunkFromChunk: Missing mesh on chunkA or chunkB!");
+            return;
+        }
+
+        Matrix4x4 A_to_world = chunkA.transform.localToWorldMatrix;
+        Matrix4x4 B_to_world = chunkB.transform.localToWorldMatrix;
+
+        Mesh meshA_world = CloneAndTransformMesh(meshA_local, A_to_world);
+        Mesh meshB_world = CloneAndTransformMesh(meshB_local, B_to_world);
+
+        Material matA = GetFirstMaterialOrDefault(chunkA);
+        Material matB = GetFirstMaterialOrDefault(chunkB);
+
+        Model result = CSG.Subtract(chunkA, chunkB);
+        if (result == null || result.mesh == null)
+        {
+            Debug.LogWarning("SubtractChunkFromChunk: Entire A was subtracted or invalid result");
+
+            chunkA.GetComponent<MeshFilter>().mesh = null;
+            return;
+        }
+
+        Mesh resultLocal = CloneAndTransformMesh(result.mesh, A_to_world.inverse);
+
+        chunkA.GetComponent<MeshFilter>().mesh = resultLocal;
+        chunkA.GetComponent<MeshRenderer>().sharedMaterials = result.materials.ToArray();
+
+        resultLocal.RecalculateNormals();
+        resultLocal.RecalculateBounds();
+    }
+
+    bool ShouldClipChunk(Mesh chunk_mesh, GameObject chunk_object, GameObject original_object)
+    {
+        Vector3[] chunk_verts = chunk_mesh.vertices;
+        int[] chunk_tris = chunk_mesh.triangles;
+
+        for (int i = 0; i < chunk_verts.Length; i++)
+        {
+            if (IsOutside(chunk_verts[i], chunk_object, original_object))
+            {
+                return true;
+            }
+        }
+
+        for(int i = 0; i < chunk_tris.Length; i += 3)
+        {
+            Vector3 v0 = chunk_verts[chunk_tris[i + 0]];
+            Vector3 v1 = chunk_verts[chunk_tris[i + 1]];
+            Vector3 v2 = chunk_verts[chunk_tris[i + 2]];
+
+            Vector3 mid = (v0 + v1 + v2) / 3.0f;
+            if(IsOutside(mid, chunk_object, original_object))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool IsOutside(Vector3 local_point, GameObject chunk_object, GameObject original_object)
+    {
+        Vector3 world = chunk_object.transform.TransformPoint(local_point);
+        Vector3 obj_local = original_object.transform.InverseTransformPoint(world);
+        return !VolumetricTetraBuilder.IsPointInsideMesh(obj_local, original_object.GetComponent<MeshFilter>().sharedMesh);
+    }
+
+    //function from other mesh, this time also pushing the mesh inward to avoid empty space and reduce potential clipping/z-fighting
+    private static void InwardOffsetMesh(Mesh mesh, float scale_factor, float push_distance, bool push_inward = true)
+    {
+        Vector3[] verts = mesh.vertices;
+        if (verts.Length == 0)
+        {
+            return;
+        }
+
+        Vector3[] normals = mesh.normals; //needed for normal based push
+        if (normals == null || normals.Length != verts.Length)
+        {
+            mesh.RecalculateNormals();
+            normals = mesh.normals;
+        }
+
+
+        Vector3 centroid = Vector3.zero;
+        for (int i = 0; i < verts.Length; i++)
+        {
+            centroid += verts[i];
+        }
+        centroid /= verts.Length;
+
+        //offset each vertex
+        for (int i = 0; i < verts.Length; i++)
+        {
+            Vector3 offset = verts[i] - centroid;
+            verts[i] = centroid + offset * scale_factor;
+        }
+
+        for (int i = 0; i < verts.Length; i++)
+        {
+            Vector3 n = normals[i].normalized;
+            if (push_inward)
+                verts[i] -= n * push_distance;
+            else
+                verts[i] += n * push_distance;
+        }
+
+        mesh.vertices = verts;
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+    }
+
 
     private void OnDrawGizmos()
     {/*
