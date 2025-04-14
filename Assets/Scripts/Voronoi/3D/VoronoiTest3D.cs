@@ -85,7 +85,7 @@ public class VoronoiTest3D : MonoBehaviour
         float volume = ComputeMeshVolumeWorld(object_mesh, transform);
         int interior_count = Mathf.RoundToInt(volume * 5.0f);
         Debug.Log(this.name + ": " + interior_count + "points");
-        num_of_sites = Mathf.RoundToInt(volume * 0.05f);
+        num_of_sites = Mathf.RoundToInt(volume * 0.07f); //original value was 0.05f
         Debug.Log(this.name + ": " + num_of_sites + "sites");
         tetra_mesh = builder.BuildTetraMesh(object_mesh, interior_count);
         //float min_dist = Mathf.Min(object_mesh.bounds.size.x, object_mesh.bounds.size.y, object_mesh.bounds.size.z) * 0.05f;
@@ -113,10 +113,12 @@ public class VoronoiTest3D : MonoBehaviour
 
         CreateLumpsWithoutHitPoint(object_mesh);
 
+        //old voronoi diagram stuff used in first implementation, no longer used
+
         //generate sites!
-        GenerateVoronoiSites();
+        //GenerateVoronoiSites();
         //generate diagram using sites!
-        GenerateVoronoiDiagram();
+        //GenerateVoronoiDiagram();
         //map sites to VoronoiVertex
         //MapSitesToVertices();
         //BuildAllVoronoiCells();
@@ -230,6 +232,9 @@ public class VoronoiTest3D : MonoBehaviour
 
         foreach (GameObject chunk in chunk_objects)
         {
+            if (!chunk)
+                continue;  //skip null due to deletion of oob chunks
+
             Rigidbody rigidbody = chunk.GetComponent<Rigidbody>();
             if (rigidbody != null)
             {
@@ -491,14 +496,73 @@ public class VoronoiTest3D : MonoBehaviour
                 }
             }
 
-            if(should_clip)
+            /* old shit
+            if (should_clip)
             {
                 InwardOffsetMesh(chunk_mesh, 0.50f, 0.00f, true);
 
                 ClipChunkToObject(chunk_object, this.gameObject);
+
+                //if chunk is empty (fully clipped somehow) then delete
+                Mesh final_mesh = chunk_object.GetComponent<MeshFilter>().sharedMesh;
+                if (final_mesh == null || final_mesh.vertexCount == 0)
+                {
+                    Debug.Log($"Chunk {lump_index} fully cut, deleting");
+                    chunk_objects.Remove(chunk_object);
+                    Destroy(chunk_object);
+                }
+
+                //final check, if chunk still has vertices outside then delete it as well
+                if (ShouldClipChunk(final_mesh, chunk_object, this.gameObject))
+                {
+                    Debug.Log($"Chunk {lump_index} still out of bounds, deleting");
+                    chunk_objects.Remove(chunk_object);
+                    Destroy(chunk_object);
+                }
+
+                if (final_mesh != null && final_mesh.vertexCount > 0)
+                {
+                    RecenterMesh(final_mesh);
+                    final_mesh.RecalculateBounds();
+                    MeshCollider mesh_collider = chunk_object.GetComponent<MeshCollider>();
+                    if (mesh_collider)
+                    {
+                        mesh_collider.sharedMesh = null;
+                        mesh_collider.sharedMesh = final_mesh;
+                    }
+                }
+            }*/
+
+            //new shit
+
+            if (should_clip)
+            {
+                bool remain = TryShrinkChunkMultipleTimes(chunk_object, this.gameObject, max_attempts: 3, scale_factor: 0.80f, push_distance: 0.02f, move_fraction: 0.1f);
+
+                if(!remain)
+                {
+                    continue;
+                }
+
+                Mesh final_mesh = chunk_object.GetComponent<MeshFilter>().sharedMesh;
+                if (final_mesh && final_mesh.vertexCount > 0)
+                {
+
+                    final_mesh.RecalculateBounds();
+                    MeshCollider collider = chunk_object.GetComponent<MeshCollider>();
+                    if (collider)
+                    {
+                        collider.sharedMesh = null;
+                        collider.sharedMesh = final_mesh;
+                    }
+                }
             }
 
-            //ClipChunkToObject(chunk_object, this.gameObject);
+            if (this.name == "Pillar_Pref")
+            {
+                Debug.Log($"mesh.bounds = {chunk_mesh.bounds.size} local space");
+                Debug.Log($"renderer.bounds = {chunk_object.GetComponent<Renderer>().bounds.size} world space");
+            }
 
             chunk_objects.Add(chunk_object);
             lump_index++;
@@ -687,6 +751,94 @@ public class VoronoiTest3D : MonoBehaviour
         mesh.RecalculateBounds();
     }
 
+    //when chunks are clipped and resized the bounds are not updated, so use this function
+    public static void RecenterMesh(Mesh mesh)
+    {
+        mesh.RecalculateBounds();
+        Bounds bounds = mesh.bounds;
+        Vector3 offset = bounds.center;
+
+        Vector3[] verts = mesh.vertices;
+        for (int i = 0; i < verts.Length; i++)
+        {
+            verts[i] -= offset;
+        }
+        mesh.vertices = verts;
+        mesh.RecalculateBounds();
+    }
+    bool TryShrinkChunkMultipleTimes(GameObject chunk_object, GameObject original_object ,int max_attempts = 3, float scale_factor = 0.90f, float push_distance = 0.02f, float move_fraction = 0.2f)
+    {
+        Vector3 object_center = original_object.transform.position;
+
+        MeshFilter mesh_filter = chunk_object.GetComponent<MeshFilter>();
+        if (!mesh_filter)
+        {
+            return false;
+        }
+        Mesh chunk_mesh = mesh_filter.sharedMesh;
+        if (!chunk_mesh || chunk_mesh.vertexCount == 0)
+        {
+            return false;
+        }
+
+        for (int attempt = 0; attempt < max_attempts; attempt++)
+        {
+            InwardOffsetMesh(chunk_mesh, scale_factor, push_distance, true);
+
+            Vector3 chunk_world_centroid = GetChunkWorldCentroid(chunk_object);
+            Vector3 to_center = object_center - chunk_world_centroid;
+            chunk_object.transform.position += to_center * move_fraction;
+
+            VoronoiTest3D.ClipChunkToObject(chunk_object, original_object);
+
+            Mesh final_mesh = mesh_filter.sharedMesh;
+            if (!final_mesh || final_mesh.vertexCount == 0)
+            {
+                chunk_objects.Remove(chunk_object);
+                Destroy(chunk_object);
+                return false;
+            }
+            final_mesh.RecalculateBounds();
+            MeshCollider mesh_collider = chunk_object.GetComponent<MeshCollider>();
+            if (mesh_collider)
+            {
+                mesh_collider.sharedMesh = null;
+                mesh_collider.sharedMesh = final_mesh;
+            }
+
+            if (!ShouldClipChunk(final_mesh, chunk_object, original_object))
+            {
+                return true;
+            }
+        }
+
+        chunk_objects.Remove(chunk_object);
+        Destroy(chunk_object);
+
+        return false;
+    }
+
+    private Vector3 GetChunkWorldCentroid(GameObject chunk_object)
+    {
+        MeshFilter mesh_filter = chunk_object.GetComponent<MeshFilter>();
+        if (!mesh_filter)
+        { 
+            return chunk_object.transform.position; 
+        }
+
+        Mesh mesh = mesh_filter.sharedMesh;
+        if (!mesh || mesh.vertexCount == 0)
+        {
+            return chunk_object.transform.position;
+        }
+
+        mesh.RecalculateBounds();
+        Bounds bounds = mesh.bounds;
+        Vector3 localCenter = bounds.center;
+        Vector3 worldCenter = chunk_object.transform.TransformPoint(localCenter);
+
+        return worldCenter;
+    }
 
     private void OnDrawGizmos()
     {/*
