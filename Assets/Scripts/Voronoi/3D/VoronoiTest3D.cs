@@ -312,7 +312,6 @@ public class VoronoiTest3D : MonoBehaviour
 
     void Fracture(Vector3 hit_point)
     {
-        // Disable the original cube's renderer and collider
         if (GetComponent<Renderer>() != null) GetComponent<Renderer>().enabled = false;
         if (GetComponent<Collider>() != null) GetComponent<Collider>().enabled = false;
 
@@ -321,7 +320,6 @@ public class VoronoiTest3D : MonoBehaviour
         float explosion_radius = 3.0f;
         float upwards_modifier = 0.1f;
 
-        // Activate physics on all fragments
         foreach (Transform fragment in transform)
         {
             Rigidbody rigidbody = fragment.GetComponent<Rigidbody>();
@@ -387,191 +385,152 @@ public class VoronoiTest3D : MonoBehaviour
         return polyhedron;
     }
 
-    private Polygon3D ClipPolygonExtended(Polygon3D face, Vector3 planeNormal, float planeDistance, float epsilon, out List<Edge3D> outEdges)
+    private Polygon3D ClipPolygonExtended(Polygon3D face, Vector3 plane_normal, float plane_distance, float epsilon, out List<Edge3D> out_edges)
     {
-        outEdges = new List<Edge3D>();
+        out_edges = new List<Edge3D>();
 
-        // 1) Check how many vertices in/out of plane
-        int insideCount = 0;
-        int outsideCount = 0;
+        int inside_count = 0;
+        int outside_count = 0;
 
-        int vertCount = face.vertices.Count;
-        var distances = new float[vertCount];
-        for (int i = 0; i < vertCount; i++)
+        int vert_count = face.vertices.Count;
+        var distances = new float[vert_count];
+        for (int i = 0; i < vert_count; i++)
         {
-            float dist = Vector3.Dot(face.vertices[i], planeNormal) + planeDistance;
+            float dist = Vector3.Dot(face.vertices[i], plane_normal) + plane_distance;
             distances[i] = dist;
 
             if (dist < -epsilon)
-                outsideCount++;
+                outside_count++;
             else
-                insideCount++;
+                inside_count++;
         }
 
-        // if fully outside => discard
-        if (outsideCount == vertCount)
+        // if fully outside discard
+        if (outside_count == vert_count)
         {
-            return new Polygon3D(); // empty => means discard
-        }
-        // if fully inside => keep original
-        if (insideCount == vertCount)
-        {
-            return face; // unmodified
+            return new Polygon3D();
         }
 
-        // 2) Collect intersection points
-        // We'll store them as pairs of (indexOfEdgeStart, intersectionPos)
-        List<(int i0, Vector3 point)> intersectionPoints = new List<(int, Vector3)>();
-        int intersectionCount = 0;
-
-        List<Vector3> newVerts = new List<Vector3>();
-
-        for (int i = 0; i < vertCount; i++)
+        if (inside_count == vert_count)
         {
-            int next = (i + 1) % vertCount;
-            float distA = distances[i];
-            float distB = distances[next];
+            return face; //unmodified
+        }
 
-            bool insideA = distA >= -epsilon;
-            bool insideB = distB >= -epsilon;
+        //collect intersection points
+        List<(int i0, Vector3 point)> intersection_points = new List<(int, Vector3)>();
+        int intersection_count = 0;
 
-            Vector3 vA = face.vertices[i];
-            Vector3 vB = face.vertices[next];
+        List<Vector3> new_verts = new List<Vector3>();
 
-            // If A is inside, keep it
-            if (insideA)
+        for (int i = 0; i < vert_count; i++)
+        {
+            int next = (i + 1) % vert_count;
+            float dist_a = distances[i];
+            float dist_b = distances[next];
+
+            bool inside_a = dist_a >= -epsilon;
+            bool inside_b = dist_b >= -epsilon;
+
+            Vector3 v_a = face.vertices[i];
+            Vector3 v_b = face.vertices[next];
+
+            if (inside_a)
             {
-                newVerts.Add(vA);
+                new_verts.Add(v_a);
             }
 
-            // If crossing plane from inside->outside or outside->inside
-            if (insideA != insideB)
+            if (inside_a != inside_b)
             {
-                float total = distA - distB;
+                float total = dist_a - dist_b;
                 if (Mathf.Abs(total) < 1e-12f)
                 {
-                    // degenerate, skip or handle
+                    //degenerate, skip or handle
                     continue;
                 }
-                float t = distA / (distA - distB);
-                Vector3 interPt = Vector3.Lerp(vA, vB, t);
+                float t = dist_a / (dist_a - dist_b);
+                Vector3 inter_pt = Vector3.Lerp(v_a, v_b, t);
 
-                newVerts.Add(interPt);
-                intersectionPoints.Add((newVerts.Count - 1, interPt));
-                // store the index in newVerts so we can refer to it later
+                new_verts.Add(inter_pt);
+                intersection_points.Add((new_verts.Count - 1, inter_pt));
+                //store the index in new_verts to reference later
 
-                intersectionCount++;
+                intersection_count++;
             }
         }
 
-        // 3) Build outEdges from intersection points 
-        //    We pair them in sets of two, as chords.
-        //    If intersectionCount != 2 or 4, we do fallback or partial approach.
-
-        if (intersectionCount == 0)
+        if (intersection_count == 0)
         {
-            // Means face is fully inside or outside. We handled that above, but just in case
-            if (outsideCount == 0) return face; // fully in
-            else return new Polygon3D();       // fully out
-        }
-        else if (intersectionCount == 2)
-        {
-            // single chord => that’s easy: the two intersectionPoints form one Edge3D
-            if (intersectionPoints.Count == 2)
+            if (outside_count == 0)
             {
-                outEdges.Add(new Edge3D(
-                    intersectionPoints[0].point,
-                    intersectionPoints[1].point
+                return face; //fully in
+            }
+
+            else
+            {
+                return new Polygon3D(); //fully out
+            }
+
+        }
+        else if (intersection_count == 2)
+        {
+            if (intersection_points.Count == 2)
+            {
+                out_edges.Add(new Edge3D(
+                    intersection_points[0].point,
+                    intersection_points[1].point
                 ));
             }
-            // return the clipped face
-            return new Polygon3D(newVerts);
+            //return clipped face
+            return new Polygon3D(new_verts);
         }
-        else if (intersectionCount == 4)
+        else if (intersection_count == 4)
         {
-            // multiple chords scenario => we have 4 intersection points => 2 chords
-            // We'll pair them up in the order found. 
-            // But be careful to ensure they form distinct pairs. 
-            // For simplicity, assume the first 2 are chord 1, next 2 are chord 2.
-
-            // Build them into outEdges
-            if (intersectionPoints.Count == 4)
+            if (intersection_points.Count == 4)
             {
-                outEdges.Add(new Edge3D(intersectionPoints[0].point, intersectionPoints[1].point));
-                outEdges.Add(new Edge3D(intersectionPoints[2].point, intersectionPoints[3].point));
+                out_edges.Add(new Edge3D(intersection_points[0].point, intersection_points[1].point));
+                out_edges.Add(new Edge3D(intersection_points[2].point, intersection_points[3].point));
             }
 
-            // Next: we must *split* the polygon into two polygons, because with 2 chords,
-            // the plane is effectively slicing the face in two places => 2 sub-polygons.
-
-            // For simplicity, let's do a naive approach: 
-            // we know newVerts includes all inside geometry plus we have 4 intersection points. 
-            // But the order of intersection points in newVerts can help us do a "cut" from chord1 to chord2.
-
-            return SplitFaceByTwoChords(newVerts, intersectionPoints, epsilon);
+            return SplitFaceByTwoChords(new_verts, intersection_points, epsilon);
         }
         else
         {
-            // fallback => more than 4 intersection => skip or discard 
-            Debug.LogWarning($"ClipPolygonExtended => {intersectionCount} intersections => fallback.");
-            return new Polygon3D(); // discard for now
-            //return face;
+            Debug.LogWarning($"ClipPolygonExtended: {intersection_count} intersections, fallback.");
+            return new Polygon3D();
         }
     }
 
     private Polygon3D SplitFaceByTwoChords(List<Vector3> newVerts, List<(int idx, Vector3 pt)> intersectionPoints, float epsilon)
     {
-        // *** For brevity, let's do a simpler approach: 
-        // We'll just keep them as 1 polygon, ignoring the real geometry of 2 sub-polygons. 
-        // This can cause "some" geometry being incorrect if it's truly a multi-chord slice. 
-        // But it’s simpler than building 2 sub-polygons. 
-        // 
-        // If you want to actually subdivide into 2 polygons, you need a method that 
-        // re-walks newVerts, cutting at chord boundaries, and forms 2 new polygons.
+        //implement actual approach here
 
-        // We'll build a single polygon for demonstration
-        // but store 2 chords as outEdges in the code above.
-
-        // If you want to keep the single polygon approach, just return "newVerts" as is:
         return new Polygon3D(newVerts);
 
-        /* 
-           If you need a real 2-sub-polygon solution:
-            1) Identify the indices of chord1 intersection points => i1, i2
-            2) Identify the indices of chord2 intersection points => i3, i4
-            3) newVerts is in order => walk from i1 to i2 => i3 => i4 => etc
-            4) Build polygon #1 => i1..i2 plus i3..i4
-            5) Build polygon #2 => i2..i3 plus i4..i1
-            or something similar.
-            This is geometry code: tricky but not huge. 
-        */
     }
 
-    private Polyhedron StrictClipPolyhedronAgainstPlane(Polyhedron polyhedron, Vector3 planeNormal, float planeDistance, float epsilon, out List<Edge3D> intersectionEdges)
+    private Polyhedron StrictClipPolyhedronAgainstPlane(Polyhedron polyhedron, Vector3 plane_normal, float plane_distance, float epsilon, out List<Edge3D> intersection_edges)
     {
-        intersectionEdges = new List<Edge3D>();
+        intersection_edges = new List<Edge3D>();
         Polyhedron clipped_polyhedron = new Polyhedron();
 
         foreach (Polygon3D face in polyhedron.faces)
         {
-            List<Edge3D> faceEdges;
+            List<Edge3D> face_edges;
             //was StrictClipPolygonAgainstPlane
             Polygon3D clipped = ClipPolygonExtended(
                 face,
-                planeNormal,
-                planeDistance,
+                plane_normal,
+                plane_distance,
                 epsilon,
-                out faceEdges
+                out face_edges
             );
-            // Add faceEdges to global intersectionEdges
-            intersectionEdges.AddRange(faceEdges);
 
-            // If clipped is not empty => it’s inside
+            intersection_edges.AddRange(face_edges);
+
             if (clipped.vertices.Count >= 3)
             {
                 clipped_polyhedron.faces.Add(clipped);
             }
-            // else => discard
         }
         return clipped_polyhedron;
     }
@@ -590,7 +549,7 @@ public class VoronoiTest3D : MonoBehaviour
                 out intersection_edges
             );
 
-            // Then do your capping with those edges
+            //then do capping with those edges
             List<List<Vector3>> loops = CappingUtilities.BuildRobustCapLoops(intersection_edges, fracture_epsilon);
             foreach (var loop in loops)
             {
@@ -598,8 +557,6 @@ public class VoronoiTest3D : MonoBehaviour
 
                 Polygon3D capFace = new Polygon3D(loop);
 
-                // (Optional) check orientation vs. plane.normal
-                // e.g. if dot(ComputeFaceNormal(capFace), plane.normal) < 0 => capFace.vertices.Reverse();
 
                 current_polyhedron.faces.Add(capFace);
             }
@@ -692,7 +649,6 @@ public class VoronoiTest3D : MonoBehaviour
             /*List<int> localTriangles = EarClippingTriangulation.Triangulate(face.vertices, faceNormal);
             if (localTriangles.Count < 3)
             {
-                // Possibly we couldn't triangulate this polygon
                 continue;
             }*/
             List<int> local_tri_incidices = TriangulateProjected(face, faceNormal);
@@ -700,12 +656,12 @@ public class VoronoiTest3D : MonoBehaviour
                 continue;
 
 
-            int baseIndex = verts.Count;
+            int base_index = verts.Count;
             verts.AddRange(face.vertices);
 
             for (int i = 0; i < local_tri_incidices.Count; i++)
             {
-                triangles.Add(baseIndex + local_tri_incidices[i]);
+                triangles.Add(base_index + local_tri_incidices[i]);
             }
         }
 
@@ -713,16 +669,6 @@ public class VoronoiTest3D : MonoBehaviour
         clipped_mesh.vertices = verts.ToArray();
         clipped_mesh.triangles = triangles.ToArray();
         clipped_mesh.RecalculateNormals();
-
-        // (E) Optionally skip extremely small bounding boxes
-        /*if (IsMeshTooSmall(clipped_mesh, 0.01f))
-        {
-            // Return an empty mesh or skip creation
-            Debug.LogWarning("Skipping a tiny fragment => won't create fragment object");
-            return new Mesh();
-        }*/
-
-        //Debug.Log($"Final mesh => vertexCount={clipped_mesh.vertexCount}, triCount={clipped_mesh.triangles.Length / 3}");
 
         return clipped_mesh;
     }
@@ -776,23 +722,21 @@ public class VoronoiTest3D : MonoBehaviour
 
     public static List<int> TriangulateProjected(Polygon3D face, Vector3 faceNormal)
     {
-        // Step A: compute face centroid
+        //get face centroid
         Vector3 centroid = Vector3.zero;
         for (int i = 0; i < face.vertices.Count; i++)
             centroid += face.vertices[i];
         centroid /= face.vertices.Count;
 
-        // Step B: build orthonormal basis (u, v) for faceNormal
-        // We'll pick 'u' as cross( faceNormal, up ) unless it’s near collinear
         Vector3 up = Vector3.up;
         if (Vector3.Dot(up, faceNormal) > 0.9f)
+        {
             up = Vector3.right;
-        // or some fallback
+        }
 
         Vector3 u = Vector3.Cross(faceNormal, up).normalized;
         Vector3 v = Vector3.Cross(faceNormal, u);  // guaranteed orthonormal
 
-        // Step C: project each vertex from 3D -> 2D
         List<Vector2> projected2D = new List<Vector2>(face.vertices.Count);
         for (int i = 0; i < face.vertices.Count; i++)
         {
@@ -802,17 +746,8 @@ public class VoronoiTest3D : MonoBehaviour
             projected2D.Add(new Vector2(x, y));
         }
 
-        // Step D: ear-clip in 2D
-        List<int> localTriIndices2D = EarClippingTriangulation2D.Triangulate2D(projected2D);
+        List<int> local_tri_idices_2D = EarClippingTriangulation2D.Triangulate2D(projected2D);
 
-        // Step E: now we have indices referencing projected2D. We need to map them back
-        // But actually we only need the ordering, because we'll add them to the final mesh 
-        // in the same order we see them.
-
-        // We'll return localTriIndices2D. 
-        // The final code that calls this will know "face.vertices" in the same index order as projected2D.
-        // i.e., face.vertices[i] -> projected2D[i].
-
-        return localTriIndices2D;
+        return local_tri_idices_2D;
     }
 }

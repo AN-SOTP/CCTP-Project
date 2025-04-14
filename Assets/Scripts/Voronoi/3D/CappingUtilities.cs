@@ -7,8 +7,6 @@ public class CappingUtilities
     public class VertexNode
     {
         public Vector3 position;
-        // We store edges that start at this node.
-        // Each edge is a reference to the other node, plus an "EdgeID" or something.
         public List<HalfEdge> edges = new List<HalfEdge>();
 
         public VertexNode(Vector3 pos)
@@ -17,86 +15,67 @@ public class CappingUtilities
         }
     }
 
-    // A half-edge storing a reference to the "end" node
     public class HalfEdge
     {
-        public VertexNode endNode;
+        public VertexNode end_node;
 
-        public HalfEdge(VertexNode e)
+        public HalfEdge(VertexNode end)
         {
-            endNode = e;
+            end_node = end;
         }
     }
 
     /// <summary>
-    /// Build robust loops from intersection edges, removing used edges 
-    /// so we can't re-traverse them infinitely.
+    ///Build robust loops from intersection edges, removing used edges 
     /// </summary>
     public static List<List<Vector3>> BuildRobustCapLoops(List<VoronoiTest3D.Edge3D> edges, float epsilon = 1e-6f)
     {
-        // 1) Merge near-duplicate vertices
-        // 2) Build adjacency as half-edges
-        // 3) Extract loops by systematically removing used edges
-        // 4) Return final loops
 
-        List<Vector3> uniquePositions = new List<Vector3>();
-        Dictionary<Vector3, int> positionToIndex = new Dictionary<Vector3, int>(new Vector3Comparer(epsilon));
+        List<Vector3> unique_positions = new List<Vector3>();
+        Dictionary<Vector3, int> position_to_index = new Dictionary<Vector3, int>(new Vector3Comparer(epsilon));
 
-        // For building the node list
-        List<(int idxA, int idxB)> edgePairs = new List<(int, int)>();
+        List<(int idxA, int idxB)> edge_pairs = new List<(int, int)>();
 
-        // Step 1: gather edges, merge endpoints
         foreach (var e in edges)
         {
-            int iA = FindOrAddPosition(uniquePositions, positionToIndex, e.start, epsilon);
-            int iB = FindOrAddPosition(uniquePositions, positionToIndex, e.end, epsilon);
+            int iA = FindOrAddPosition(unique_positions, position_to_index, e.start, epsilon);
+            int iB = FindOrAddPosition(unique_positions, position_to_index, e.end, epsilon);
             if (iA != iB)
             {
-                edgePairs.Add((iA, iB));
+                edge_pairs.Add((iA, iB));
             }
         }
 
-        // Step 2: create VertexNode for each unique position
-        List<VertexNode> nodes = new List<VertexNode>(uniquePositions.Count);
-        for (int i = 0; i < uniquePositions.Count; i++)
+        List<VertexNode> nodes = new List<VertexNode>(unique_positions.Count);
+        for (int i = 0; i < unique_positions.Count; i++)
         {
-            nodes.Add(new VertexNode(uniquePositions[i]));
+            nodes.Add(new VertexNode(unique_positions[i]));
         }
 
-        // Build adjacency with half-edges
-        foreach (var (idxA, idxB) in edgePairs)
+        foreach (var (idxA, idxB) in edge_pairs)
         {
             var nA = nodes[idxA];
             var nB = nodes[idxB];
 
-            // add half-edge A->B
             nA.edges.Add(new HalfEdge(nB));
-            // add half-edge B->A
             nB.edges.Add(new HalfEdge(nA));
         }
 
-        // Step 3: find loops by systematically "using" edges
-        // We'll store them in a final list
         List<List<Vector3>> loops = new List<List<Vector3>>();
 
-        // We'll systematically attempt to build loops from each node's edges
-        // removing edges as we go so we can't infinitely loop
         for (int i = 0; i < nodes.Count; i++)
         {
-            VertexNode startNode = nodes[i];
+            VertexNode start_node = nodes[i];
 
-            // while this node still has edges
-            while (startNode.edges.Count > 0)
+            while (start_node.edges.Count > 0)
             {
-                // attempt building a loop from the first half-edge
-                HalfEdge e0 = startNode.edges[0];
-                List<Vector3> loop = BuildLoopFromHalfEdge(startNode, e0, epsilon);
+                HalfEdge e0 = start_node.edges[0];
+                List<Vector3> loop = BuildLoopFromHalfEdge(start_node, e0, epsilon);
 
                 if (loop.Count >= 3)
                 {
                     loops.Add(loop);
                 }
-                // if it’s partial or fails, we discard
             }
         }
 
@@ -104,84 +83,79 @@ public class CappingUtilities
     }
 
     /// <summary>
-    /// Attempt to build a loop by walking half-edges until we come back to 'startNode'
-    /// or run out of edges. Each half-edge we use is removed from adjacency so we can't re-traverse it.
+    ///Attempt to build a loop by walking half-edges until we come back to start_noden or run out of edgfes
     /// </summary>
-    private static List<Vector3> BuildLoopFromHalfEdge(VertexNode startNode, HalfEdge initialEdge, float epsilon)
+    private static List<Vector3> BuildLoopFromHalfEdge(VertexNode start_node, HalfEdge initial_edge, float epsilon)
     {
         List<Vector3> path = new List<Vector3>();
-        path.Add(startNode.position);
+        path.Add(start_node.position);
 
-        VertexNode currentNode = startNode;
-        HalfEdge currentEdge = initialEdge;
+        VertexNode current_node = start_node;
+        HalfEdge current_edge = initial_edge;
 
-        // Remove the edge from adjacency
-        RemoveHalfEdge(currentNode, currentEdge);
+        RemoveHalfEdge(current_node, current_edge);
 
-        // Follow it
-        VertexNode nextNode = currentEdge.endNode;
-        path.Add(nextNode.position);
+        VertexNode next_node = current_edge.end_node;
+        path.Add(next_node.position);
 
-        VertexNode prevNode = currentNode;
-        currentNode = nextNode;
+        VertexNode previous_node = current_node;
+        current_node = next_node;
 
-        int safetyCount = 0;
+        int safety_count = 0;
 
         while (true)
         {
-            safetyCount++;
-            if (safetyCount > 10000)
+            safety_count++;
+            if (safety_count > 10000)
             {
-                // prevents infinite loop
+                //prevents infinite loop
                 Debug.LogError("BuildLoopFromHalfEdge: Exceeded iteration limit. Breaking to avoid freeze.");
                 path.Clear();
                 return path;
             }
 
-            // find a half-edge from currentNode that isn't pointing back to prevNode
-            HalfEdge nextEdge = FindUnvisitedEdge(currentNode, prevNode);
-            if (nextEdge == null)
+            HalfEdge next_edge = FindUnvisitedEdge(current_node, previous_node);
+            if (next_edge == null)
             {
-                // can't continue, partial chain
                 path.Clear();
                 return path;
             }
 
-            RemoveHalfEdge(currentNode, nextEdge);
-            nextNode = nextEdge.endNode;
-            path.Add(nextNode.position);
+            RemoveHalfEdge(current_node, next_edge);
+            next_node = next_edge.end_node;
+            path.Add(next_node.position);
 
-            // check if nextNode is startNode
-            if ((nextNode.position - startNode.position).sqrMagnitude < epsilon * epsilon)
+            if ((next_node.position - start_node.position).sqrMagnitude < epsilon * epsilon)
             {
-                // closed
                 break;
             }
 
-            prevNode = currentNode;
-            currentNode = nextNode;
+            previous_node = current_node;
+            current_node = next_node;
         }
 
-        // remove last if same as first
         if ((path[path.Count - 1] - path[0]).sqrMagnitude < epsilon * epsilon)
+        {
             path.RemoveAt(path.Count - 1);
+        }
 
         if (path.Count < 3)
+        {
             path.Clear();
+        }
 
         return path;
     }
 
     /// <summary>
-    /// Find an edge from 'node' that leads to a next node 
-    /// that isn't 'prevNode'. If none exist, returns null.
+    /// Find an edge from node that leads to a next node that isn't previous_node. If none exist, returns null.
     /// </summary>
-    private static HalfEdge FindUnvisitedEdge(VertexNode node, VertexNode prevNode)
+    private static HalfEdge FindUnvisitedEdge(VertexNode node, VertexNode previous_node)
     {
         for (int i = 0; i < node.edges.Count; i++)
         {
-            // we pick the first edge that doesn't go back to prevNode
-            if (node.edges[i].endNode != prevNode)
+            //pick the first edge that doesn't go back to prevNode
+            if (node.edges[i].end_node != previous_node)
             {
                 return node.edges[i];
             }
@@ -189,16 +163,11 @@ public class CappingUtilities
         return null;
     }
 
-    /// <summary>
-    /// Removes 'edgeToRemove' from 'node''s list of half-edges
-    /// (the one that matches endNode).
-    /// </summary>
-    private static void RemoveHalfEdge(VertexNode node, HalfEdge edgeToRemove)
+    private static void RemoveHalfEdge(VertexNode node, HalfEdge edge_to_remove)
     {
-        // remove the first instance that has the same endNode
         for (int i = 0; i < node.edges.Count; i++)
         {
-            if (node.edges[i].endNode == edgeToRemove.endNode)
+            if (node.edges[i].end_node == edge_to_remove.end_node)
             {
                 node.edges.RemoveAt(i);
                 return;
@@ -206,26 +175,17 @@ public class CappingUtilities
         }
     }
 
-    // Merge or find existing position close to 'pos' within 'epsilon'
-    private static int FindOrAddPosition(
-        List<Vector3> uniquePositions,
-        Dictionary<Vector3, int> positionToIndex,
-        Vector3 pos, float epsilon
-    )
+    private static int FindOrAddPosition(List<Vector3> unique_positions, Dictionary<Vector3, int> position_to_index, Vector3 pos, float epsilon)
     {
-        if (!positionToIndex.TryGetValue(pos, out int index))
+        if (!position_to_index.TryGetValue(pos, out int index))
         {
-            index = uniquePositions.Count;
-            uniquePositions.Add(pos);
-            positionToIndex[pos] = index;
+            index = unique_positions.Count;
+            unique_positions.Add(pos);
+            position_to_index[pos] = index;
         }
         return index;
     }
 
-    /// <summary>
-    /// A custom comparer that treats positions within epsilon as equal.
-    /// Ensures dictionary lookups treat near-duplicates as the same key.
-    /// </summary>
     private class Vector3Comparer : IEqualityComparer<Vector3>
     {
         private float epsilon;
