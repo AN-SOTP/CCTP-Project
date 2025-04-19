@@ -8,7 +8,7 @@ using UnityEngine;
 using Unity.VisualScripting;
 using UnityEditor.U2D;
 
-public class VoronoiTest2DScuffed : MonoBehaviour
+public class VoronoiTest2D : MonoBehaviour
 {
     PolygonCollider2D poly_collider;
     public int num_of_fragments = 10;
@@ -75,8 +75,6 @@ public class VoronoiTest2DScuffed : MonoBehaviour
 
         //convert fracture points to VoronoiLib's FortuneSite
         List<FortuneSite> sites = fracture_points.Select(p => new FortuneSite(p.x, p.y)).ToList();
-
-        //Rect bounds_rect = new Rect(object_bounds.min.x, object_bounds.min.y, object_bounds.max.x, object_bounds.max.y);
 
         //fortunes algorithm computes voronoi diagram
         edges = FortunesAlgorithm.Run(sites, object_bounds.min.x, object_bounds.min.y, object_bounds.max.x, object_bounds.max.y);
