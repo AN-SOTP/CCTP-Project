@@ -4,15 +4,15 @@ using MIConvexHull;
 
 public static class ConvexHullChunkBuilder
 {
-    public static Mesh BuildConvexHullForLump(List<TetraCell> lump)
+    public static Mesh BuildConvexHullForChunk(List<TetraCell> chunk)
     {
-        //collect all vertices from all tetrahedra in the lump
+        //collect all vertices from all tetrahedra in the chunk
         List<DefaultVertex> all_points = new List<DefaultVertex>();
         HashSet<Vector3> unique_positions = new HashSet<Vector3>();
 
-        for (int i = 0; i < lump.Count; i++)
+        for (int i = 0; i < chunk.Count; i++)
         {
-            TetraVertex[] tv = lump[i].Vertices;
+            TetraVertex[] tv = chunk[i].Vertices;
             if (tv == null || tv.Length < 4)
             {
                 continue;
@@ -98,33 +98,6 @@ public static class ConvexHullChunkBuilder
         mesh.RecalculateBounds();
 
         return mesh;
-    }
-
-    private static void InwardOffsetMesh(Mesh mesh, float scale_factor)
-    {
-        Vector3[] verts = mesh.vertices;
-        if (verts.Length == 0)
-        {
-            return;
-        }
-
-        Vector3 centroid = Vector3.zero;
-        for (int i = 0; i < verts.Length; i++)
-        {
-            centroid += verts[i];
-        }
-        centroid /= verts.Length;
-
-        // offset each vertex
-        for (int i = 0; i < verts.Length; i++)
-        {
-            Vector3 offset = verts[i] - centroid;
-            verts[i] = centroid + offset * scale_factor;
-        }
-
-        mesh.vertices = verts;
-        mesh.RecalculateNormals();
-        mesh.RecalculateBounds();
     }
 
     private static Vector3 ToV3(TetraVertex tv)

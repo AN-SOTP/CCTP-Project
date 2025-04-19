@@ -10,6 +10,7 @@ using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.UIElements;
 using static UnityEditor.MaterialProperty;
+using static UnityEditor.PlayerSettings;
 using static VoronoiTest3D;
 
 //[ExecuteInEditMode]
@@ -111,7 +112,7 @@ public class VoronoiTest3D : MonoBehaviour
         //print number of triangle of mesh
         Debug.Log(Equals(object_mesh.triangles.Length, 0) ? "No triangles in mesh" : "Number of triangles in mesh: " + object_mesh.triangles.Length);
 
-        CreateLumpsWithoutHitPoint(object_mesh);
+        //CreateChunksWithoutHitPoint(object_mesh);
 
         //old voronoi diagram stuff used in first implementation, no longer used
 
@@ -214,7 +215,7 @@ public class VoronoiTest3D : MonoBehaviour
 
     void FractureVolumetric(Vector3 hit_point)
     {
-        //CreateLumps(this.GetComponent<MeshFilter>().sharedMesh, hit_point);
+        CreateChunksBasedOnHitPoint(GetComponent<MeshFilter>().sharedMesh, hit_point);
 
         if (GetComponent<Renderer>() != null)
         {
@@ -239,7 +240,7 @@ public class VoronoiTest3D : MonoBehaviour
             if (rigidbody != null)
             {
                 rigidbody.isKinematic = false;
-                rigidbody.AddExplosionForce(explosion_force, hit_point, explosion_radius, upwards_modifier, ForceMode.Impulse);
+                //rigidbody.AddExplosionForce(explosion_force, hit_point, explosion_radius, upwards_modifier, ForceMode.Impulse);
             }
         }
     }
@@ -350,7 +351,7 @@ public class VoronoiTest3D : MonoBehaviour
         return mean + std_deviation * rand_std_normal;
     }
 
-    void CreateLumps(Mesh object_mesh, Vector3 hit_point)
+    void CreateChunksBasedOnHitPoint(Mesh object_mesh, Vector3 hit_point)
     {
         var all_cells = tetra_mesh.Cells.ToList();
         //Dictionary<TetraCell, List<TetraCell>> adjacency = TetraAdjacency.BuildAdjacencyGraph(tetra_mesh);
@@ -362,21 +363,21 @@ public class VoronoiTest3D : MonoBehaviour
         Bounds bounds = object_mesh.bounds;
         List<Vector3> seeds = GenerateBiasedSeeds(hit_local, bounds, num_of_sites);
         Debug.Log($"{this.name}: Generated {seeds.Count} biased seeds based on hit at {hit_point}");
-        var lumps = TetraPartitioner.Partition(tetra_mesh, seeds);
+        var chunks = TetraPartitioner.Partition(tetra_mesh, seeds);
 
         Bounds mesh_bounds = object_mesh.bounds;
 
         //var lumps = TetraLumpPartitioner.PartitionTetraMesh(tetra_mesh, seeds);
-        int lump_index = 0;
-        foreach (var lump in lumps)
+        int chunk_index = 0;
+        foreach (var chunk in chunks)
         {
             //build a mesh, game object etc. for this chunk
             //Mesh chunk_mesh = VolumetricTetraBuilder.BuildMeshForLump(lump);
-            Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForLump(lump);
+            Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForChunk(chunk);
             //Mesh chunk_mesh = UnionMeshChunkBuilder.BuildUnionMeshForLump(lump);
             //Mesh chunk_mesh = VolumetricLumpReconstructor.BuildMeshFromLump(lump);
 
-            GameObject chunk_object = new GameObject("TetraLump_" + lump_index);
+            GameObject chunk_object = new GameObject("TetraChunk_" + chunk);
             chunk_object.transform.SetParent(this.transform, false);
 
             MeshFilter mf = chunk_object.AddComponent<MeshFilter>();
@@ -394,14 +395,58 @@ public class VoronoiTest3D : MonoBehaviour
             Rigidbody rb = chunk_object.AddComponent<Rigidbody>();
             rb.isKinematic = true;
 
-            ClipChunkToObject(chunk_object, this.gameObject);
+            bool should_clip = false;
+
+            //first bounding box check and then vertex and mid face check
+            Bounds chunk_bounds = chunk_mesh.bounds;
+            if (!bounds.Contains(chunk_bounds.min) || !bounds.Contains(chunk_bounds.max))
+            {
+                should_clip = true;
+            }
+            else
+            {
+                if (ShouldClipChunk(chunk_mesh, chunk_object, this.gameObject))
+                {
+                    should_clip = true;
+                }
+            }
+
+            if (should_clip)
+            {
+                bool remain = TryShrinkChunkMultipleTimes(chunk_object, this.gameObject, max_attempts: 3, scale_factor: 0.80f, push_distance: 0.02f, move_fraction: 0.1f);
+
+                if (!remain)
+                {
+                    continue;
+                }
+
+                Mesh final_mesh = chunk_object.GetComponent<MeshFilter>().sharedMesh;
+                if (final_mesh && final_mesh.vertexCount > 0)
+                {
+
+                    final_mesh.RecalculateBounds();
+                    MeshCollider collider = chunk_object.GetComponent<MeshCollider>();
+                    if (collider)
+                    {
+                        collider.sharedMesh = null;
+                        collider.sharedMesh = final_mesh;
+                    }
+                }
+            }
+
+            /* used to test specific object
+            if (this.name == "Pillar_Pref")
+            {
+                Debug.Log($"mesh.bounds = {chunk_mesh.bounds.size} local space");
+                Debug.Log($"renderer.bounds = {chunk_object.GetComponent<Renderer>().bounds.size} world space");
+            }*/
 
             chunk_objects.Add(chunk_object);
-            lump_index++;
+            chunk_index++;
         }
     }
 
-    void CreateLumpsWithoutHitPoint(Mesh object_mesh)
+    void CreateChunksWithoutHitPoint(Mesh object_mesh)
     {
         var all_cells = tetra_mesh.Cells.ToList();
         
@@ -413,21 +458,21 @@ public class VoronoiTest3D : MonoBehaviour
 
         Bounds bounds = object_mesh.bounds;
         List<Vector3> seeds = GenerateUniformSeeds(bounds, num_of_sites);
-        var lumps = TetraPartitioner.Partition(tetra_mesh, seeds);
+        var chunks = TetraPartitioner.Partition(tetra_mesh, seeds);
 
         Bounds mesh_bounds = object_mesh.bounds;
 
         //var lumps = TetraLumpPartitioner.PartitionTetraMesh(tetra_mesh, seeds);
-        int lump_index = 0;
-        foreach (var lump in lumps)
+        int chunk_index = 0;
+        foreach (var chunk in chunks)
         {
             //build a mesh, game object etc. for this chunk
             //Mesh chunk_mesh = VolumetricTetraBuilder.BuildMeshForLump(lump);
-            Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForLump(lump);
+            Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForChunk(chunk);
             //Mesh chunk_mesh = UnionMeshChunkBuilder.BuildUnionMeshForLump(lump);
             //Mesh chunk_mesh = VolumetricLumpReconstructor.BuildMeshFromLump(lump);
 
-            GameObject chunk_object = new GameObject("TetraLump_" + lump_index);
+            GameObject chunk_object = new GameObject("TetraChunk" + chunk_index);
             chunk_object.transform.SetParent(this.transform, false);
 
             MeshFilter mf = chunk_object.AddComponent<MeshFilter>();
@@ -444,41 +489,6 @@ public class VoronoiTest3D : MonoBehaviour
 
             Rigidbody rb = chunk_object.AddComponent<Rigidbody>();
             rb.isKinematic = true;
-
-            /*
-            for (int j = 0; j < chunk_objects.Count; j++)
-            {
-                GameObject finalized = chunk_objects[j];
-                SubtractChunkFromChunk(chunk_object, finalized);
-
-                Mesh testMesh = chunk_object.GetComponent<MeshFilter>().mesh;
-                if (testMesh == null || testMesh.vertexCount == 0)
-                {
-                    Debug.Log($"Chunk {lump_index} fully overlapped, discarding");
-                    Destroy(chunk_object);
-                    chunk_object = null;
-                    break;
-                }
-            }
-
-            if (chunk_object != null)
-            {
-                ClipChunkToObject(chunk_object, this.gameObject);
-
-                Mesh final_mesh = chunk_object.GetComponent<MeshFilter>().mesh;
-                if (final_mesh == null || final_mesh.vertexCount == 0)
-                {
-                    Debug.Log($"Chunk {lump_index} oob so discard");
-                    Destroy(chunk_object);
-                    chunk_object = null;
-                }
-                else
-                {
-                    chunk_objects.Add(chunk_object);
-                    lump_index++;
-                }
-            }*/
-
 
             bool should_clip = false;
 
@@ -495,45 +505,6 @@ public class VoronoiTest3D : MonoBehaviour
                     should_clip = true;
                 }
             }
-
-            /* old shit
-            if (should_clip)
-            {
-                InwardOffsetMesh(chunk_mesh, 0.50f, 0.00f, true);
-
-                ClipChunkToObject(chunk_object, this.gameObject);
-
-                //if chunk is empty (fully clipped somehow) then delete
-                Mesh final_mesh = chunk_object.GetComponent<MeshFilter>().sharedMesh;
-                if (final_mesh == null || final_mesh.vertexCount == 0)
-                {
-                    Debug.Log($"Chunk {lump_index} fully cut, deleting");
-                    chunk_objects.Remove(chunk_object);
-                    Destroy(chunk_object);
-                }
-
-                //final check, if chunk still has vertices outside then delete it as well
-                if (ShouldClipChunk(final_mesh, chunk_object, this.gameObject))
-                {
-                    Debug.Log($"Chunk {lump_index} still out of bounds, deleting");
-                    chunk_objects.Remove(chunk_object);
-                    Destroy(chunk_object);
-                }
-
-                if (final_mesh != null && final_mesh.vertexCount > 0)
-                {
-                    RecenterMesh(final_mesh);
-                    final_mesh.RecalculateBounds();
-                    MeshCollider mesh_collider = chunk_object.GetComponent<MeshCollider>();
-                    if (mesh_collider)
-                    {
-                        mesh_collider.sharedMesh = null;
-                        mesh_collider.sharedMesh = final_mesh;
-                    }
-                }
-            }*/
-
-            //new shit
 
             if (should_clip)
             {
@@ -565,7 +536,7 @@ public class VoronoiTest3D : MonoBehaviour
             }
 
             chunk_objects.Add(chunk_object);
-            lump_index++;
+            chunk_index++;
         }
     }
 
@@ -722,7 +693,6 @@ public class VoronoiTest3D : MonoBehaviour
             normals = mesh.normals;
         }
 
-
         Vector3 centroid = Vector3.zero;
         for (int i = 0; i < verts.Length; i++)
         {
@@ -781,6 +751,8 @@ public class VoronoiTest3D : MonoBehaviour
             return false;
         }
 
+        bool success = false;
+
         for (int attempt = 0; attempt < max_attempts; attempt++)
         {
             InwardOffsetMesh(chunk_mesh, scale_factor, push_distance, true);
@@ -789,31 +761,42 @@ public class VoronoiTest3D : MonoBehaviour
             Vector3 to_center = object_center - chunk_world_centroid;
             chunk_object.transform.position += to_center * move_fraction;
 
-            VoronoiTest3D.ClipChunkToObject(chunk_object, original_object);
+            if(!ShouldClipChunk(chunk_mesh, chunk_object, original_object))
+            {
+                success = true;
+                break;
+            }
+        }
 
-            Mesh final_mesh = mesh_filter.sharedMesh;
-            if (!final_mesh || final_mesh.vertexCount == 0)
+        if(!success)
+        {
+
+            ClipChunkToObject(chunk_object, original_object);
+
+            chunk_mesh = mesh_filter.sharedMesh;
+            if (!chunk_mesh || chunk_mesh.vertexCount == 0 || ShouldClipChunk(chunk_mesh, chunk_object, original_object))
             {
                 chunk_objects.Remove(chunk_object);
                 Destroy(chunk_object);
                 return false;
             }
-            final_mesh.RecalculateBounds();
+            else
+            {
+                success = true;
+            }
+        }
+
+        if(success)
+        {
+            chunk_mesh.RecalculateBounds();
             MeshCollider mesh_collider = chunk_object.GetComponent<MeshCollider>();
             if (mesh_collider)
             {
                 mesh_collider.sharedMesh = null;
-                mesh_collider.sharedMesh = final_mesh;
+                mesh_collider.sharedMesh = chunk_mesh;
             }
-
-            if (!ShouldClipChunk(final_mesh, chunk_object, original_object))
-            {
-                return true;
-            }
+            return true;
         }
-
-        chunk_objects.Remove(chunk_object);
-        Destroy(chunk_object);
 
         return false;
     }
