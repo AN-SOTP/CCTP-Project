@@ -683,11 +683,11 @@ public class VoronoiTest3D : MonoBehaviour
         Gizmos.DrawWireCube(object_bounds.center, object_bounds.size);
 
         //draws green spheres at the position of voronoi sites
-        Gizmos.color = Color.green;
-        foreach (var site in voronoi_sites)
-        {
-            Gizmos.DrawSphere(site, 0.02f);
-        }
+        //Gizmos.color = Color.green;
+        //foreach (var site in voronoi_sites)
+        //{
+            //Gizmos.DrawSphere(site, 0.02f);
+        //}
 
         //draw voronoi edges. red lines represent edges of the diagram between finite cells, blue spheres are drawn at circumcenter of finite cells
         //for edges, iterate over each edge in the voronoi mesh. if both source and target cells of edge are within the cube

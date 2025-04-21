@@ -6,6 +6,7 @@ using UnityEngine;
 
 //represents a cell in the delaunay triangulation
 //inherits from TriangulationCell which is a class in MIConvexHull representing a cell in the triangulation.
+//CLARIFICATION: VoronoiCell represents a Delaunay tetrahedron with the actual Voronoi region being reconstructed later from its circumcentres
 public class VoronoiCell : TriangulationCell<VoronoiVertex, VoronoiCell>
 {
     //circumcenter of cell
