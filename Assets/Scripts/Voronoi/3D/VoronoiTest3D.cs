@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,6 +8,7 @@ using Sabresaurus;
 using Sabresaurus.SabreCSG;
 using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.Profiling;
 using UnityEngine.UIElements;
 using static UnityEditor.MaterialProperty;
 using static UnityEditor.PlayerSettings;
@@ -76,7 +77,7 @@ public class VoronoiTest3D : MonoBehaviour
         //float volume = ComputeMeshVolumeLocal(object_mesh);
         float volume = ComputeMeshVolumeWorld(object_mesh, transform);
         int interior_count = Mathf.RoundToInt(volume * 5.0f);
-        Debug.Log(this.name + ": " + interior_count + "points");
+        //Debug.Log(this.name + ": " + interior_count + "points");
         num_of_sites = Mathf.RoundToInt(volume * 0.07f); //original value was 0.05f
         Debug.Log(this.name + ": " + num_of_sites + "sites");
         tetra_mesh = builder.BuildTetraMesh(object_mesh, interior_count);
@@ -101,9 +102,7 @@ public class VoronoiTest3D : MonoBehaviour
         mesh_collider.convex = false; //what the fuck?
 
         //print number of triangle of mesh
-        Debug.Log(Equals(object_mesh.triangles.Length, 0) ? "No triangles in mesh" : "Number of triangles in mesh: " + object_mesh.triangles.Length);
-
-        //CreateChunksWithoutHitPoint(object_mesh);
+        //Debug.Log(Equals(object_mesh.triangles.Length, 0) ? "No triangles in mesh" : "Number of triangles in mesh: " + object_mesh.triangles.Length);
 
         //old voronoi diagram stuff used in first implementation, no longer used
 
@@ -114,6 +113,12 @@ public class VoronoiTest3D : MonoBehaviour
         //map sites to VoronoiVertex
         //MapSitesToVertices();
         //BuildAllVoronoiCells();
+
+        float time1 = Time.realtimeSinceStartup;
+        CreateChunksWithoutHitPoint(object_mesh);
+        float time2 = Time.realtimeSinceStartup;
+
+        Debug.Log($"CreateChunksWithoutHitPoint took {(time1 - time2) * 1000f:F1} ms on: " + this.name);
     }
 
     // Update is called once per frame
@@ -139,7 +144,6 @@ public class VoronoiTest3D : MonoBehaviour
 
     void FractureVolumetric(Vector3 hit_point)
     {
-        CreateChunksBasedOnHitPoint(GetComponent<MeshFilter>().sharedMesh, hit_point);
 
         if (GetComponent<Renderer>() != null)
         {
@@ -286,7 +290,7 @@ public class VoronoiTest3D : MonoBehaviour
 
         Bounds bounds = object_mesh.bounds;
         List<Vector3> seeds = GenerateBiasedSeeds(hit_local, bounds, num_of_sites);
-        Debug.Log($"{this.name}: Generated {seeds.Count} biased seeds based on hit at {hit_point}");
+        //Debug.Log($"{this.name}: Generated {seeds.Count} biased seeds based on hit at {hit_point}");
         var chunks = TetraPartitioner.Partition(tetra_mesh, seeds);
 
         Bounds mesh_bounds = object_mesh.bounds;
@@ -391,11 +395,7 @@ public class VoronoiTest3D : MonoBehaviour
         foreach (var chunk in chunks)
         {
             //build a mesh, game object etc. for this chunk
-            //Mesh chunk_mesh = VolumetricTetraBuilder.BuildMeshForLump(lump);
             Mesh chunk_mesh = ConvexHullChunkBuilder.BuildConvexHullForChunk(chunk);
-            //Mesh chunk_mesh = UnionMeshChunkBuilder.BuildUnionMeshForLump(lump);
-            //Mesh chunk_mesh = VolumetricLumpReconstructor.BuildMeshFromLump(lump);
-
             GameObject chunk_object = new GameObject("TetraChunk" + chunk_index);
             chunk_object.transform.SetParent(this.transform, false);
 
@@ -418,7 +418,14 @@ public class VoronoiTest3D : MonoBehaviour
 
             //first bounding box check and then vertex and mid face check
             Bounds chunk_bounds = chunk_mesh.bounds;
-            if (!bounds.Contains(chunk_bounds.min) || !bounds.Contains(chunk_bounds.max))
+
+            //bounds check is not good enough on complex meshes so no reason to use it, just use vertex and mid face check
+            if (ShouldClipChunk(chunk_mesh, chunk_object, this.gameObject))
+            {
+                should_clip = true;
+            }
+
+            /*if (!bounds.Contains(chunk_bounds.min) || !bounds.Contains(chunk_bounds.max))
             {
                 should_clip = true;
             }
@@ -428,7 +435,7 @@ public class VoronoiTest3D : MonoBehaviour
                 {
                     should_clip = true;
                 }
-            }
+            }*/
 
             if (should_clip)
             {
@@ -455,8 +462,8 @@ public class VoronoiTest3D : MonoBehaviour
 
             if (this.name == "Pillar_Pref")
             {
-                Debug.Log($"mesh.bounds = {chunk_mesh.bounds.size} local space");
-                Debug.Log($"renderer.bounds = {chunk_object.GetComponent<Renderer>().bounds.size} world space");
+                //Debug.Log($"mesh.bounds = {chunk_mesh.bounds.size} local space");
+                //Debug.Log($"renderer.bounds = {chunk_object.GetComponent<Renderer>().bounds.size} world space");
             }
 
             chunk_objects.Add(chunk_object);
@@ -476,12 +483,6 @@ public class VoronoiTest3D : MonoBehaviour
 
         Matrix4x4 chunk_to_world = chunk_object.transform.localToWorldMatrix;
         Matrix4x4 original_to_world = original_object.transform.localToWorldMatrix;
-
-        Mesh chunk_mesh_world = CloneAndTransformMesh(chunk_mesh_local, chunk_to_world);
-        Mesh original_mesh_world = CloneAndTransformMesh(original_mesh_local, original_to_world);
-
-        Material chunk_mat = GetFirstMaterialOrDefault(chunk_object);
-        Material original_mat = GetFirstMaterialOrDefault(original_object);
 
         Model clipped_model = CSG.Intersect(chunk_object, original_object);
         if (clipped_model == null || clipped_model.mesh == null)
@@ -535,7 +536,7 @@ public class VoronoiTest3D : MonoBehaviour
         Mesh meshB_local = chunkB.GetComponent<MeshFilter>().mesh;
         if (meshA_local == null || meshB_local == null)
         {
-            Debug.LogError("SubtractChunkFromChunk: Missing mesh on chunkA or chunkB!");
+            //Debug.LogError("SubtractChunkFromChunk: Missing mesh on chunkA or chunkB!");
             return;
         }
 
@@ -551,7 +552,7 @@ public class VoronoiTest3D : MonoBehaviour
         Model result = CSG.Subtract(chunkA, chunkB);
         if (result == null || result.mesh == null)
         {
-            Debug.LogWarning("SubtractChunkFromChunk: Entire A was subtracted or invalid result");
+            //Debug.LogWarning("SubtractChunkFromChunk: Entire A was subtracted or invalid result");
 
             chunkA.GetComponent<MeshFilter>().mesh = null;
             return;
@@ -694,7 +695,6 @@ public class VoronoiTest3D : MonoBehaviour
 
         if(!success)
         {
-
             ClipChunkToObject(chunk_object, original_object);
 
             chunk_mesh = mesh_filter.sharedMesh;
@@ -831,4 +831,5 @@ public class VoronoiTest3D : MonoBehaviour
     {
         return new Vector3((float)tv.Position[0], (float)tv.Position[1], (float)tv.Position[2]);
     }
+
 }
