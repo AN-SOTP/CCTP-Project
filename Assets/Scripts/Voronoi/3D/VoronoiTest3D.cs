@@ -20,6 +20,7 @@ public class VoronoiTest3D : MonoBehaviour
     //local bounds volume of cube mesh
     private Bounds object_bounds;
     public int num_of_sites;
+    public float num_multiplier = 0.025f;
     
 
     public float fracture_epsilon = 1e-4f;
@@ -78,7 +79,7 @@ public class VoronoiTest3D : MonoBehaviour
         float volume = ComputeMeshVolumeWorld(object_mesh, transform);
         int interior_count = Mathf.RoundToInt(volume * 5.0f);
         //Debug.Log(this.name + ": " + interior_count + "points");
-        num_of_sites = Mathf.RoundToInt(volume * 0.07f); //original value was 0.05f
+        num_of_sites = Mathf.RoundToInt(volume * num_multiplier); //original value was 0.05f/0.07f
         Debug.Log(this.name + ": " + num_of_sites + "sites");
         tetra_mesh = builder.BuildTetraMesh(object_mesh, interior_count);
         //float min_dist = Mathf.Min(object_mesh.bounds.size.x, object_mesh.bounds.size.y, object_mesh.bounds.size.z) * 0.05f;
@@ -144,7 +145,6 @@ public class VoronoiTest3D : MonoBehaviour
 
     void FractureVolumetric(Vector3 hit_point)
     {
-
         if (GetComponent<Renderer>() != null)
         {
             GetComponent<Renderer>().enabled = false;
@@ -162,7 +162,9 @@ public class VoronoiTest3D : MonoBehaviour
         foreach (GameObject chunk in chunk_objects)
         {
             if (!chunk)
+            {
                 continue;  //skip null due to deletion of oob chunks
+            }
 
             Rigidbody rigidbody = chunk.GetComponent<Rigidbody>();
             if (rigidbody != null)
@@ -366,7 +368,7 @@ public class VoronoiTest3D : MonoBehaviour
             if (this.name == "Pillar_Pref")
             {
                 Debug.Log($"mesh.bounds = {chunk_mesh.bounds.size} local space");
-                Debug.Log($"renderer.bounds = {chunk_object.GetComponent<Renderer>().bounds.size} world space");
+                Debug.Log($"renderer.bounds = {chunk_object.GetComponent<Renderer>().bounds.size} world space"); 
             }*/
 
             chunk_objects.Add(chunk_object);
