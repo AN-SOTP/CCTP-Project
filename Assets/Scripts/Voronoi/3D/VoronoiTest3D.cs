@@ -51,7 +51,7 @@ public class VoronoiTest3D : MonoBehaviour
         //float volume = ComputeMeshVolume(object_mesh);
         //float volume = ComputeMeshVolumeLocal(object_mesh);
         float volume = ComputeMeshVolumeWorld(object_mesh, transform);
-        int interior_count = Mathf.RoundToInt(volume * 5.0f);
+        int interior_count = Mathf.RoundToInt(volume * 1.0f);
         //Debug.Log(this.name + ": " + interior_count + "points");
         num_of_sites = Mathf.RoundToInt(volume * num_multiplier); //original value was 0.05f/0.07f
         Debug.Log(this.name + ": " + num_of_sites + "sites");
@@ -773,10 +773,13 @@ public class VoronoiTest3D : MonoBehaviour
                 Gizmos.DrawSphere(cell.Circumcenter, 0.01f);
             }
         }
-
-        //TETRA BUILDER DEBUG SHIT
         */
-        /*if (VolumetricTetraBuilder.debug_sample_points != null)
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        //TETRA BUILDER DEBUG
+        if (VolumetricTetraBuilder.debug_sample_points != null)
         {
             Gizmos.color = Color.red;
             foreach (var local_point in VolumetricTetraBuilder.debug_sample_points)
@@ -808,7 +811,6 @@ public class VoronoiTest3D : MonoBehaviour
         }
 
         Gizmos.matrix = Matrix4x4.identity;
-        */
     }
 
     private Vector3 ToV3(TetraVertex tv)
