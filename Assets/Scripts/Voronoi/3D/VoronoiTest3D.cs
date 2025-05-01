@@ -115,11 +115,11 @@ public class VoronoiTest3D : MonoBehaviour
         //MapSitesToVertices();
         //BuildAllVoronoiCells();
 
-        float time1 = Time.realtimeSinceStartup;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         CreateChunksWithoutHitPoint(object_mesh);
-        float time2 = Time.realtimeSinceStartup;
+        stopwatch.Stop();
 
-        Debug.Log($"CreateChunksWithoutHitPoint took {(time1 - time2) * 1000f:F1} ms on: " + this.name);
+        Debug.Log($"CreateChunksWithoutHitPoint took {stopwatch.ElapsedMilliseconds} ms on: " + this.name);
     }
 
     // Update is called once per frame
@@ -401,20 +401,20 @@ public class VoronoiTest3D : MonoBehaviour
             GameObject chunk_object = new GameObject("TetraChunk" + chunk_index);
             chunk_object.transform.SetParent(this.transform, false);
 
-            MeshFilter mf = chunk_object.AddComponent<MeshFilter>();
-            mf.sharedMesh = chunk_mesh;
+            MeshFilter mesh_filter = chunk_object.AddComponent<MeshFilter>();
+            mesh_filter.sharedMesh = chunk_mesh;
 
-            MeshRenderer mr = chunk_object.AddComponent<MeshRenderer>();
+            MeshRenderer mesh_renderer = chunk_object.AddComponent<MeshRenderer>();
             // mr.material = new Material(Shader.Find("Standard"));
-            mr.material = this.GetComponent<MeshRenderer>().sharedMaterial;
+            mesh_renderer.material = this.GetComponent<MeshRenderer>().sharedMaterial;
             //mr.material.color = Color.Lerp(Color.red, Color.yellow, UnityEngine.Random.value);
 
-            MeshCollider mc = chunk_object.AddComponent<MeshCollider>();
-            mc.sharedMesh = chunk_mesh;
-            mc.convex = true;
+            MeshCollider mesh_collider = chunk_object.AddComponent<MeshCollider>();
+            mesh_collider.sharedMesh = chunk_mesh;
+            mesh_collider.convex = true;
 
-            Rigidbody rb = chunk_object.AddComponent<Rigidbody>();
-            rb.isKinematic = true;
+            Rigidbody rigidbody = chunk_object.AddComponent<Rigidbody>();
+            rigidbody.isKinematic = true;
 
             bool should_clip = false;
 
@@ -448,10 +448,24 @@ public class VoronoiTest3D : MonoBehaviour
                     continue;
                 }
 
+                /*
+                //delete chunk if its too thin
+                const float min_thickness = 0.1f; //0.015f = 1.5cm
+                chunk_object.GetComponent<MeshFilter>().sharedMesh.RecalculateBounds();
+
+                float thickness = Mathf.Min(chunk_object.GetComponent<MeshFilter>().sharedMesh.bounds.size.x, chunk_object.GetComponent<MeshFilter>().sharedMesh.bounds.size.y, chunk_object.GetComponent<MeshFilter>().sharedMesh.bounds.size.z);
+                if (thickness < min_thickness)
+                {
+                    //chunk_objects.Remove(chunk_object);
+
+                    GameObject.Destroy(chunk_object);
+                    continue;
+                }
+                */
+
                 Mesh final_mesh = chunk_object.GetComponent<MeshFilter>().sharedMesh;
                 if (final_mesh && final_mesh.vertexCount > 0)
                 {
-
                     final_mesh.RecalculateBounds();
                     MeshCollider collider = chunk_object.GetComponent<MeshCollider>();
                     if (collider)
@@ -460,12 +474,6 @@ public class VoronoiTest3D : MonoBehaviour
                         collider.sharedMesh = final_mesh;
                     }
                 }
-            }
-
-            if (this.name == "Pillar_Pref")
-            {
-                //Debug.Log($"mesh.bounds = {chunk_mesh.bounds.size} local space");
-                //Debug.Log($"renderer.bounds = {chunk_object.GetComponent<Renderer>().bounds.size} world space");
             }
 
             chunk_objects.Add(chunk_object);
@@ -523,10 +531,10 @@ public class VoronoiTest3D : MonoBehaviour
 
     private static Material GetFirstMaterialOrDefault(GameObject obj)
     {
-        MeshRenderer mr = obj.GetComponent<MeshRenderer>();
-        if (mr && mr.sharedMaterials != null && mr.sharedMaterials.Length > 0)
+        MeshRenderer mesh_renderer = obj.GetComponent<MeshRenderer>();
+        if (mesh_renderer && mesh_renderer.sharedMaterials != null && mesh_renderer.sharedMaterials.Length > 0)
         {
-            return mr.sharedMaterials[0];
+            return mesh_renderer.sharedMaterials[0];
         }
 
         return new Material(Shader.Find("Standard"));
@@ -703,7 +711,7 @@ public class VoronoiTest3D : MonoBehaviour
             if (!chunk_mesh || chunk_mesh.vertexCount == 0 || ShouldClipChunk(chunk_mesh, chunk_object, original_object))
             {
                 chunk_objects.Remove(chunk_object);
-                Destroy(chunk_object);
+                GameObject.Destroy(chunk_object);
                 return false;
             }
             else
