@@ -21,39 +21,13 @@ public class VoronoiTest3D : MonoBehaviour
     private Bounds object_bounds;
     public int num_of_sites;
     public float num_multiplier = 0.025f;
-    
-
-    public float fracture_epsilon = 1e-4f;
 
     private DelaunayTriangulation<TetraVertex, TetraCell> tetra_mesh;
     //make list of exisitng chunk game objects
     List<GameObject> chunk_objects = new List<GameObject>();
     private DelaunayTriangulation<TetraVertex, TetraCell> current_tetra_mesh;
 
-    [System.Serializable]
-    public struct plane_data
-    {
-        public Vector3 normal;
-        public float distance;
-    }
-    private List<plane_data> object_planes;
-
-
     private bool fractured = false;
-
-    /// <summary>
-    /// Represents a line segment in 3D: intersection of a face's edge with the clipping plane.
-    /// </summary>
-    public struct Edge3D
-    {
-        public Vector3 start;
-        public Vector3 end;
-        public Edge3D(Vector3 s, Vector3 e)
-        {
-            start = s;
-            end = e;
-        }
-    }
 
     void Start()
     {
@@ -448,9 +422,9 @@ public class VoronoiTest3D : MonoBehaviour
                     continue;
                 }
 
-                /*
+                
                 //delete chunk if its too thin
-                const float min_thickness = 0.1f; //0.015f = 1.5cm
+                const float min_thickness = 0.15f; //0.01f = 1cm
                 chunk_object.GetComponent<MeshFilter>().sharedMesh.RecalculateBounds();
 
                 float thickness = Mathf.Min(chunk_object.GetComponent<MeshFilter>().sharedMesh.bounds.size.x, chunk_object.GetComponent<MeshFilter>().sharedMesh.bounds.size.y, chunk_object.GetComponent<MeshFilter>().sharedMesh.bounds.size.z);
@@ -461,7 +435,7 @@ public class VoronoiTest3D : MonoBehaviour
                     GameObject.Destroy(chunk_object);
                     continue;
                 }
-                */
+                
 
                 Mesh final_mesh = chunk_object.GetComponent<MeshFilter>().sharedMesh;
                 if (final_mesh && final_mesh.vertexCount > 0)
