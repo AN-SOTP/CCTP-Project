@@ -7,3 +7,8 @@ Two main external libraries are used in this project:
 
 MIConvexHull: https://designengrlab.github.io/MIConvexHull/
 pb_CSG: https://github.com/karl-/pb_CSG
+
+Assets used in test scene:
+Rock package: https://assetstore.unity.com/packages/3d/props/exterior/rock-package-118182
+Stone Pillar: https://assetstore.unity.com/packages/3d/environments/stone-pillar-34670
+Stones: https://assetstore.unity.com/packages/3d/props/exterior/stones-40329
