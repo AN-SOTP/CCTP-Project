@@ -38,6 +38,7 @@ public class VoronoiTest3D : MonoBehaviour
             mesh_filter = gameObject.AddComponent<MeshFilter>();
             //return;
         }
+
         Mesh object_mesh = GetComponent<MeshFilter>().sharedMesh;
         if (object_mesh == null)
         {
